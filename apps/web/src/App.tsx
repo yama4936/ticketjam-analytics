@@ -519,7 +519,15 @@ export function App() {
                           比較する販売期間
                           <select
                             value={selectedSale?.id ?? ""}
-                            onChange={(e) => setSaleWindow(e.target.value)}
+                            onChange={(e) => {
+                              setSaleWindow(e.target.value);
+                              if (
+                                !selectedOfficial.sale_windows?.find(
+                                  (w) => w.id === e.target.value,
+                                )?.starts_at
+                              )
+                                setAxis("date");
+                            }}
                           >
                             {selectedOfficial.sale_windows?.map((w) => (
                               <option key={w.id} value={w.id}>

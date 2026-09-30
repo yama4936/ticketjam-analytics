@@ -29,14 +29,15 @@ export function Charts({
   releasedAt: string | null;
   faceValue: number | null;
 }) {
+  const timeAxis = axis === "release" && !releasedAt ? "date" : axis;
   const start = new Date(data.event.starts_at).getTime();
   const points = data.timeline
     .map((p) => ({
       ...p,
       x:
-        axis === "remaining"
+        timeAxis === "remaining"
           ? (start - new Date(p.time).getTime()) / 3600000
-          : axis === "release" && releasedAt
+          : timeAxis === "release" && releasedAt
             ? (new Date(p.time).getTime() - Date.parse(releasedAt)) / 3600000
             : new Date(p.time).getTime(),
       ratio:
@@ -44,7 +45,7 @@ export function Charts({
     }))
     .sort((a, b) => a.x - b.x);
   const tick = (x: number) =>
-    axis !== "date"
+    timeAxis !== "date"
       ? `${Math.round(x)}h`
       : new Date(x).toLocaleString("ja-JP", {
           month: "numeric",
