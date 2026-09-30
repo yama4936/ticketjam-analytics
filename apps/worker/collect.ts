@@ -8,7 +8,7 @@ export async function collectEvent(
   pool: pg.Pool,
   sourceEventId: string,
   scheduledAt: Date,
-  http = new TicketjamHttp(pool),
+  http: Pick<TicketjamHttp, "get"> = new TicketjamHttp(pool),
 ) {
   const lock = await pool.connect();
   let runId: string | undefined;

@@ -3,8 +3,10 @@ import type { Comparison as ComparisonData } from "./types.js";
 export function Comparison({
   group,
   choose,
+  refreshVersion,
 }: {
   group: string;
+  refreshVersion: number;
   choose: (id: string) => void;
 }) {
   const [by, setBy] = useState("event"),
@@ -25,7 +27,7 @@ export function Comparison({
         if (e.name !== "AbortError") setError(e.message);
       });
     return () => c.abort();
-  }, [group, by]);
+  }, [group, by, refreshVersion]);
   const money = (v: number | null) =>
     v === null ? "—" : `¥${v.toLocaleString("ja-JP")}`;
   return (

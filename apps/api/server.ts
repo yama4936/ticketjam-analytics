@@ -8,10 +8,7 @@ import { resolve } from "node:path";
 import type pg from "pg";
 import { createPool } from "../../packages/db/pool.js";
 import { NORMALIZATION_VERSION } from "../../packages/domain/types.js";
-import {
-  histogram,
-  priceSummary,
-} from "../../packages/analytics/statistics.js";
+import { histogram } from "../../packages/analytics/statistics.js";
 import { registerComparison } from "./comparison.js";
 import { registerAdmin } from "./admin.js";
 import { withMissingSlots } from "../../packages/analytics/timeline.js";
@@ -111,8 +108,8 @@ export async function buildServer(pool: pg.Pool) {
       )
     ).rows;
     const scope = (
-      await pool.query(`SELECT (SELECT count(*)::int FROM discovery_candidates) AS candidates,
-      (SELECT count(*)::int FROM source_events WHERE enabled) AS monitored,
+      await pool.query(`SELECT (SELECT count(DISTINCT (source,external_id))::int FROM discovery_candidates) AS candidates,
+      (SELECT count(*)::int FROM source_events s JOIN events e ON e.id=s.event_id WHERE s.enabled AND e.starts_at>now() AND EXISTS(SELECT 1 FROM event_groups eg JOIN groups g ON g.id=eg.group_id WHERE eg.event_id=e.id AND g.enabled)) AS monitored,
       (SELECT min(observed_at) FROM listing_observations) AS observation_started_at,
       (SELECT blocked_until>now() FROM source_state WHERE source='ticketjam') AS source_blocked`)
     ).rows[0];

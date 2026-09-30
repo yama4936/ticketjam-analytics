@@ -138,12 +138,13 @@ export function App() {
   }, [selected, type, prefix, lower, upper, days, refresh, officialType]);
   useEffect(() => {
     const fn = () =>
-      setSelected(new URLSearchParams(location.search).get("event") ?? "");
+      choose(new URLSearchParams(location.search).get("event") ?? "", false);
     addEventListener("popstate", fn);
     return () => removeEventListener("popstate", fn);
   }, []);
-  function choose(id: string) {
+  function choose(id: string, pushHistory = true) {
     setSelected(id);
+    setDetail((previous) => (previous?.event.id === id ? previous : null));
     setType("");
     setPrefix("");
     setLower("");
@@ -153,7 +154,7 @@ export function App() {
     setAxis("date");
     const url = new URL(location.href);
     id ? url.searchParams.set("event", id) : url.searchParams.delete("event");
-    history.pushState({}, "", url);
+    if (pushHistory) history.pushState({}, "", url);
     setTab("analysis");
   }
   const selectedOfficial = detail?.official.find((o) => o.id === officialType);
@@ -296,7 +297,11 @@ export function App() {
           <section className="analysis-area" aria-live="polite">
             {!selected ? (
               <>
-                <Comparison group={group} choose={choose} />
+                <Comparison
+                  group={group}
+                  choose={choose}
+                  refreshVersion={refresh}
+                />
                 <div className="welcome panel">
                   <span className="eyebrow">START EXPLORING</span>
                   <h2>気になる公演を選んでください</h2>
