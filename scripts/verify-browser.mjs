@@ -43,121 +43,111 @@ try {
   );
   await until("document.querySelectorAll('.event-card').length >= 2");
   assert.equal(
-    await evaluate("!!document.querySelector('.analysis-area table')"),
+    await evaluate(
+      "!!document.querySelector('input[placeholder=\"公演を検索\"]')",
+    ),
     false,
   );
-  pass("Event-first landing has no mixed price table");
-  await browser("click", ".compare-button");
-  await until("document.querySelector('.analysis-area table')");
-  await evaluate("performance.clearResourceTimings()");
-  await browser("click", ".topbar button");
+  assert.equal(
+    await evaluate("document.body.textContent.includes('Internet Archive')"),
+    false,
+  );
+  pass("Event selection without search or archive controls");
+  await browser("select", ".events-panel select", "past");
   await until(
-    "performance.getEntriesByType('resource').some(e=>e.name.includes('/api/comparison'))",
+    "performance.getEntriesByType('resource').some(e=>e.name.includes('scope=past'))",
   );
-  pass("Optional comparison reload requests fresh data");
-  await browser(
-    "fill",
-    "input[placeholder='公演を検索']",
-    "no-such-event-890123",
-  );
-  await until("document.querySelector('.events-panel .empty')");
-  await browser("click", "input[placeholder='公演を検索']");
-  await browser("press", "Control+a");
-  await browser("press", "Backspace");
-  await until("document.querySelectorAll('.event-card').length >= 2");
-  pass("Search empty result and recovery");
+  await browser("select", ".events-panel select", "upcoming");
+  await until("document.querySelectorAll('.event-card').length>=2");
+  pass("Past and upcoming event scopes");
   await evaluate("document.querySelector('.event-card').click()");
   await until("document.querySelector('.ticket-type')");
-  assert.equal(await evaluate("!!document.querySelector('.filterbar')"), false);
+  assert.equal(
+    await evaluate("!!document.querySelector('.selling-analysis')"),
+    false,
+  );
   const firstUrl = await evaluate("location.href");
   await evaluate("document.querySelector('.ticket-type').click()");
-  await until(
-    "document.querySelector('.history-controls') && !document.querySelector('[role=status]')",
+  await until("document.querySelector('.selling-analysis .recharts-wrapper')");
+  assert.equal(
+    await evaluate("!!document.querySelector('.history-controls')"),
+    false,
   );
+  pass("Event then ticket type opens selling graphs without snapshot controls");
+  await browser("select", ".selling-analysis select", "sold");
+  await until(
+    "document.querySelector('.selling-analysis select').value==='sold'",
+  );
+  await browser("select", ".selling-analysis select", "all");
+  pass("Purchased-only scatter comparison and return");
+  await browser(
+    "select",
+    ".analysis-area > .graph-controls label:first-child select",
+    "7",
+  );
+  await until(
+    "performance.getEntriesByType('resource').some(e=>e.name.includes('days=7')) && !document.querySelector('.analysis-area > .loading[role=status]')",
+  );
+  pass("Analysis period fetches filtered data");
+  await evaluate(
+    "[...document.querySelectorAll('.event-family')].find(e=>e.textContent.includes('iLIVE!')).querySelector('button').click()",
+  );
+  await until(
+    "document.querySelector('.ticket-type') && !document.querySelector('.selling-analysis')",
+  );
+  await evaluate(
+    "[...document.querySelectorAll('.ticket-type')].find(e=>e.textContent.includes('Sチケット')).click()",
+  );
+  await until("document.querySelector('.selling-analysis .recharts-wrapper')");
+  const options = await evaluate(
+    "document.querySelectorAll('.analysis-area > .graph-controls select')[1].options.length",
+  );
+  assert.ok(options >= 2);
+  const lastSale = await evaluate(
+    "[...document.querySelectorAll('.analysis-area > .graph-controls select')[1].options].at(-1).value",
+  );
+  await browser(
+    "select",
+    ".analysis-area > .graph-controls label:nth-child(2) select",
+    lastSale,
+  );
+  await until(
+    "document.querySelector('.selling-analysis').textContent.includes('基準発売')",
+  );
+  pass("Official release baseline can switch between sales windows");
+  await browser("click", ".evidence-details summary");
+  assert.ok(await evaluate("document.querySelector('.evidence-details').open"));
   assert.ok(
     await evaluate(
-      "document.querySelector('.tabs button:nth-child(2)').classList.contains('active')",
+      "document.querySelector('.evidence-details').textContent.includes('成約価格')",
     ),
   );
-  pass("Event then ticket type opens current listings by default");
-  const historyId = await evaluate(
-    "document.querySelector('.history-controls select').options[2]?.value",
-  );
-  assert.ok(historyId, "Need at least two observations to verify history");
-  await browser("select", ".history-controls select", historyId);
-  await until(
-    "document.querySelector('.history-controls h3')?.textContent.includes('過去') && !document.querySelector('[role=status]')",
-  );
-  const displayed = await evaluate(
-    "document.querySelector('.analysis-area').textContent",
-  );
-  assert.ok(displayed.includes("現在の販売状況とは異なります"));
-  await browser("select", ".history-controls select", "");
-  await until(
-    "document.querySelector('.history-controls h3')?.textContent.includes('販売中') && !document.querySelector('[role=status]')",
-  );
-  pass("Saved observation selection and return to current inventory");
-  await browser("fill", "input[placeholder='1']", "200");
-  await browser("fill", "input[placeholder='100']", "100");
-  await until(
-    "[...document.querySelectorAll('[role=alert]')].some(e=>e.textContent.includes('400'))",
-  );
-  await browser("fill", "input[placeholder='1']", "1");
-  await browser("click", "input[placeholder='100']");
-  await browser("press", "Control+a");
-  await browser("press", "Backspace");
-  await until("!document.querySelector('.analysis-area [role=alert]')");
-  pass("Invalid numeric range reports error and recovers");
-  await evaluate(
-    "[...document.querySelectorAll('.event-card')].at(-1).click()",
-  );
-  await until(
-    "document.querySelector('.ticket-type') && !document.querySelector('.filterbar')",
-  );
-  await evaluate("document.querySelector('.ticket-type').click()");
-  await until("document.querySelector('.filterbar')");
-  await browser("fill", "input[placeholder='A / B / S']", "ZZZ");
-  await until(
-    "document.querySelector('.analysis-area .empty')?.textContent.includes('この条件')",
-  );
+  pass("Evidence clearly separates purchased status from actual sale price");
   await browser("back");
   await until(
-    "document.querySelector('.ticket-type') && !document.querySelector('.filterbar')",
+    "document.querySelector('.ticket-type') && !document.querySelector('.selling-analysis')",
   );
   assert.equal(await evaluate("location.href"), firstUrl);
-  await evaluate("document.querySelector('.ticket-type').click()");
-  await until("document.querySelector('.filterbar')");
-  assert.deepEqual(
-    await evaluate(
-      "[...document.querySelectorAll('.filterbar input')].map(e=>e.value)",
-    ),
-    ["", "", ""],
-  );
-  pass("Back navigation clears ticket type and event-specific filters");
-  await browser("click", ".tabs button:nth-child(1)");
-  await until("document.querySelector('.metrics')");
-  await browser("click", ".tabs button:nth-child(3)");
-  await until(
-    "document.body.textContent.includes('Internet Archiveの保存ページ')",
-  );
-  pass("Analysis and official/coverage tabs, archive reference link");
+  pass("Back navigation resets ticket selection");
   await browser("open", firstUrl);
   await until("document.querySelector('.ticket-type')");
-  pass("Direct event URL loads ticket selection");
   await evaluate("document.querySelector('.ticket-type').click()");
-  await until(
-    "document.querySelector('.history-controls') && !document.querySelector('[role=status]')",
-  );
+  await until("document.querySelector('.selling-analysis .recharts-wrapper')");
   for (const width of [1440, 390]) {
-    await browser("set", "viewport", String(width), "900");
-    await until("document.documentElement.scrollWidth <= innerWidth");
-    await mkdir(".local/evidence", { recursive: true });
+    await browser("set", "viewport", String(width), "1000");
+    await until("document.documentElement.scrollWidth<=innerWidth");
     await browser(
       "screenshot",
-      resolve(".local/evidence/routes-" + width + ".png"),
+      resolve(".local/evidence/selling-" + width + ".png"),
     );
+    await evaluate("document.querySelector('.chart-grid').scrollIntoView()");
+    await browser(
+      "screenshot",
+      resolve(".local/evidence/selling-charts-" + width + ".png"),
+    );
+    await evaluate("window.scrollTo(0,0)");
   }
-  pass("Desktop/mobile layout has no horizontal overflow");
+  pass("Direct URL and desktop/mobile graphs without horizontal overflow");
   await browser("open", base + "/?event=00000000-0000-4000-8000-000000000000");
   await until(
     "document.querySelector('[role=alert]')?.textContent.includes('404')",

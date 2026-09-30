@@ -1,3 +1,4 @@
+import { checkOutcomes } from "./outcomes.js";
 import { monitor } from "../../packages/db/monitor.js";
 import { PgBoss } from "pg-boss";
 import { createPool } from "../../packages/db/pool.js";
@@ -23,6 +24,7 @@ for (const name of [
   "discover-group",
   "collect-event",
   "official-refresh",
+  "check-outcomes",
 ])
   await boss.createQueue(name, {
     retryLimit: 2,
@@ -99,6 +101,15 @@ await boss.work<{ sourceId: string; scheduledAt: string }>(
       );
   },
 );
+await boss.work("check-outcomes", async () => {
+  console.log(
+    JSON.stringify({
+      type: "outcomes_checked",
+      ...(await checkOutcomes(pool)),
+    }),
+  );
+});
+await boss.schedule("check-outcomes", "10 * * * *", null, { tz: "Asia/Tokyo" });
 await boss.schedule("hourly-scan", "0 * * * *", null, { tz: "Asia/Tokyo" });
 await boss.work("official-refresh", async () => {
   console.log(

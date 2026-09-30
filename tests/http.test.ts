@@ -120,3 +120,66 @@ test(
     }
   },
 );
+
+test(
+  "purchase checks follow one public redirect with isolated anonymous cookies",
+  { skip: !process.env.TEST_DATABASE_URL },
+  async () => {
+    const pool = createPool(process.env.TEST_DATABASE_URL);
+    try {
+      await migrate(pool);
+      await pool.query(
+        "UPDATE source_state SET blocked_until=NULL,next_request_at=now(),min_interval_ms=1000 WHERE source='ticketjam'",
+      );
+      const cookies: string[] = [];
+      const fake: typeof fetch = async (input, init) => {
+        const url = String(input);
+        const cookie = new Headers(init?.headers).get("cookie") ?? "";
+        cookies.push(cookie);
+        if (url.endsWith("robots.txt"))
+          return new Response("User-agent: *\nAllow: /", {
+            headers: { "content-type": "text/plain" },
+          });
+        if (url.includes("/ticket/")) {
+          assert.equal(cookie, "");
+          return new Response(null, {
+            status: 302,
+            headers: {
+              location: "https://ticketjam.jp/tickets/test/event/123",
+              "set-cookie": "flash=purchased; Path=/; HttpOnly",
+            },
+          });
+        }
+        assert.equal(cookie, "flash=purchased");
+        return new Response(
+          '<div class="flash_wrapper"><p>購入済みチケットのため、同じ公演のチケットを表示しています。</p></div>',
+          { headers: { "content-type": "text/html" } },
+        );
+      };
+      const http = new TicketjamHttp(pool, fake);
+      assert.equal(
+        (
+          await http.getTicketOutcome(
+            "https://ticketjam.jp/ticket/live_domestic/1",
+          )
+        ).finalUrl,
+        "https://ticketjam.jp/tickets/test/event/123",
+      );
+      await http.getTicketOutcome(
+        "https://ticketjam.jp/ticket/live_domestic/2",
+      );
+      assert.deepEqual(cookies, [
+        "",
+        "",
+        "flash=purchased",
+        "",
+        "flash=purchased",
+      ]);
+    } finally {
+      await pool.query(
+        "UPDATE source_state SET blocked_until=NULL,next_request_at=now(),min_interval_ms=5000 WHERE source='ticketjam'",
+      );
+      await pool.end();
+    }
+  },
+);

@@ -3,7 +3,7 @@ import { NORMALIZATION_VERSION, type Admission } from "../domain/types.js";
 export function normalizeAdmission(raw: string): Admission {
   const value = raw
     .normalize("NFKC")
-    .replace(/[〜～–−ー]/g, "-")
+    .replace(/[~〜～–−ー]/g, "-")
     .trim();
   const base: Admission = {
     raw,
@@ -30,7 +30,7 @@ export function normalizeAdmission(raw: string): Admission {
       return base;
     return { ...base, kind: "range", prefix, lower, upper };
   }
-  const band = value.match(/(?:^|[^A-Za-z0-9])([A-Za-z]{0,3})\s*(\d{1,6})番台/);
+  const band = value.match(/(?:^|[^A-Za-z0-9])([A-Za-z]{0,3})\s*(\d{1,6})番[台代]/);
   if (band) {
     const lower = Number(band[2]);
     const zeroCount = band[2]!.match(/0+$/)?.[0].length ?? 0;

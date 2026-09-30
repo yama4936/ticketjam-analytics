@@ -45,6 +45,24 @@ export class PublicSourceHttp {
   }
 
   async get(url: string): Promise<{ html: string; observedAt: Date }> {
+    return this.getPage(url);
+  }
+
+  // A fresh anonymous cookie context carries only this ticket's redirect notice.
+  async getTicketOutcome(url: string) {
+    if (
+      this.source !== "ticketjam" ||
+      !/^https:\/\/ticketjam.jp\/ticket\/[a-z_]+\/\d+$/.test(url)
+    )
+      throw new Error("Expected ticket detail URL");
+    return this.getPage(url, true);
+  }
+
+  private async getPage(
+    url: string,
+    followTicketRedirect = false,
+    cookie = "",
+  ): Promise<{ html: string; observedAt: Date; finalUrl: string }> {
     const checked = new URL(url);
     if (
       checked.origin !== this.origin ||
@@ -77,10 +95,30 @@ export class PublicSourceHttp {
     }
     if (this.robots.isAllowed(checked.href, USER_AGENT) !== true)
       throw new SourceBlockedError("robots.txt does not allow this path");
-    return this.request(checked.href);
+    const result = await this.request(
+      checked.href,
+      cookie,
+      followTicketRedirect,
+    );
+    if (result.redirectUrl)
+      return this.getPage(result.redirectUrl, false, result.cookie);
+    return {
+      html: result.html,
+      observedAt: result.observedAt,
+      finalUrl: checked.href,
+    };
   }
 
-  private async request(url: string) {
+  private async request(
+    url: string,
+    cookie = "",
+    followTicketRedirect = false,
+  ): Promise<{
+    html: string;
+    observedAt: Date;
+    redirectUrl?: string;
+    cookie?: string;
+  }> {
     const client = await this.pool.connect();
     try {
       await client.query("SELECT pg_advisory_lock(hashtext($1))", [
@@ -105,6 +143,7 @@ export class PublicSourceHttp {
           redirect: "manual",
           headers: {
             "User-Agent": USER_AGENT,
+            ...(cookie ? { Cookie: cookie } : {}),
             Accept: url.endsWith("/robots.txt") ? "text/plain" : "text/html",
           },
           signal: AbortSignal.timeout(30000),
@@ -131,6 +170,21 @@ export class PublicSourceHttp {
           ).test(target.pathname)
         ) {
           await response.body?.cancel();
+          if (
+            followTicketRedirect &&
+            this.source === "ticketjam" &&
+            !target.search
+          ) {
+            return {
+              html: "",
+              observedAt: new Date(),
+              redirectUrl: target.href,
+              cookie: response.headers
+                .getSetCookie()
+                .map((c) => c.split(";")[0])
+                .join("; "),
+            };
+          }
           throw new SourceHttpError(response.status);
         }
       }

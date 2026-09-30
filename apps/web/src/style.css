@@ -949,3 +949,54 @@ footer strong {
     min-width: 0;
   }
 }
+
+.selling-analysis > h3 {
+  margin-top: 24px;
+}
+.selling-analysis .metrics {
+  margin: 18px 0;
+}
+.purchase-summary {
+  margin: 18px 0;
+  border-left: 4px solid #176f59;
+}
+.purchase-summary ul {
+  margin: 12px 0;
+  padding-left: 22px;
+  line-height: 2;
+}
+.evidence-details {
+  margin-top: 20px;
+}
+.evidence-details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.selling-analysis .chart {
+  height: 320px;
+}
+.graph-controls label {
+  min-width: 0;
+}
+.graph-controls select {
+  max-width: 100%;
+}
+@media (max-width: 720px) {
+  .selling-analysis .chart {
+    height: 300px;
+  }
+  .graph-controls {
+    align-items: stretch;
+  }
+}
+
+.has-event .intro {
+  display: none;
+}
+.has-event .ticket-type {
+  padding: 12px;
+  gap: 6px;
+}
+.has-event .ticket-type.selected {
+  padding: 11px;
+}

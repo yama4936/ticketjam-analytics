@@ -1,5 +1,5 @@
 export const PARSER_VERSION = "ticketjam-1";
-export const NORMALIZATION_VERSION = "admission-2";
+export const NORMALIZATION_VERSION = "admission-3";
 
 export type ListingState = "listed" | "sold_confirmed" | "ended_unknown";
 export interface Admission {

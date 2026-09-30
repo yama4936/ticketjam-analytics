@@ -130,7 +130,7 @@ export async function buildServer(pool: pg.Pool) {
     return {
       events,
       scope,
-      capabilities: { soldConfirmation: false, officialMatching: true },
+      capabilities: { soldConfirmation: true, officialMatching: true },
     };
   });
   app.get("/api/events/:id", async (request, reply) => {
@@ -243,6 +243,18 @@ export async function buildServer(pool: pg.Pool) {
         args,
       )
     ).rows;
+    const outcomes = (
+      await pool.query(
+        `SELECT l.id,l.url,l.state,l.first_observed_at,l.last_observed_at,l.last_listed_at,
+      o.price_yen AS asking_price_yen,o.confirmed_sale_price_yen,o.admission_raw,n.admission_lower,n.admission_upper,n.admission_prefix,
+      c.interval_start,c.interval_end
+      FROM listings l JOIN LATERAL(SELECT * FROM listing_observations WHERE listing_id=l.id ORDER BY observed_at DESC LIMIT 1)o ON true
+      LEFT JOIN observation_normalizations n ON n.observation_id=o.id AND n.version=$2
+      LEFT JOIN LATERAL(SELECT interval_start,interval_end FROM listing_changes WHERE listing_id=l.id AND kind=CASE WHEN l.state='sold_confirmed' THEN 'sold_confirmed' ELSE 'ended_unknown' END ORDER BY interval_end DESC LIMIT 1)c ON l.state<>'listed'
+      WHERE l.event_id=$1 AND ${condition} AND l.last_observed_at>now()-$7::int*interval '1 day' ORDER BY l.id LIMIT 5001`,
+        args,
+      )
+    ).rows;
     const types = (
       await pool.query(
         `SELECT DISTINCT n.ticket_type FROM observation_normalizations n JOIN listing_observations o ON o.id=n.observation_id JOIN listings l ON l.id=o.listing_id
@@ -291,6 +303,8 @@ export async function buildServer(pool: pg.Pool) {
           ? "history"
           : "current",
       event,
+      outcomes: outcomes.slice(0, 5000),
+      outcomesTruncated: outcomes.length > 5000,
       priceGroups,
       priceComparable,
       filters: f,
@@ -312,7 +326,7 @@ export async function buildServer(pool: pg.Pool) {
         : [],
       truncated: observations.length === 5000,
       latestStatus: timeline.at(-1)?.status ?? "unobserved",
-      capabilities: { soldConfirmation: false },
+      capabilities: { soldConfirmation: true },
     };
   });
   const publicRoot = fileURLToPath(new URL("../../dist/web/", import.meta.url));

@@ -13,6 +13,8 @@ test("number, prefixes, bands and ranges keep the original value", () => {
     ["1部 A80-85", "A", 80, 85],
     ["整理番号120番台", null, 120, 129],
     ["S1-S30", "S", 1, 30],
+    ["S535~545", "S", 535, 545],
+    ["S800番代", "S", 800, 899],
   ] as const) {
     const actual = normalizeAdmission(raw);
     assert.deepEqual(

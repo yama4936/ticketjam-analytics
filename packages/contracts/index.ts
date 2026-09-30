@@ -104,7 +104,25 @@ export interface Official {
       }[]
     | null;
 }
+export interface Outcome {
+  id: string;
+  url: string;
+  state: string;
+  first_observed_at: string;
+  last_observed_at: string;
+  last_listed_at: string | null;
+  asking_price_yen: number;
+  confirmed_sale_price_yen: number | null;
+  admission_raw: string;
+  admission_lower: number | null;
+  admission_upper: number | null;
+  admission_prefix: string | null;
+  interval_start: string | null;
+  interval_end: string | null;
+}
 export interface Detail {
+  outcomes: Outcome[];
+  outcomesTruncated: boolean;
   snapshots: { id: string; observed_at: string; status: string }[];
   selectedSnapshot: { id: string; observed_at: string; status: string } | null;
   view: "current" | "history";
