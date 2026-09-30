@@ -175,6 +175,19 @@ test(
         (await app.inject(`/api/events/${eventId}`)).json().view,
         "history",
       );
+      const past = (await app.inject(`/api/events?q=${key}&scope=past`)).json();
+      assert.deepEqual(
+        past.events.map((e: any) => e.id),
+        [eventId],
+      );
+      const upcoming = (
+        await app.inject(`/api/events?q=${key}&scope=upcoming`)
+      ).json();
+      assert.ok(!upcoming.events.some((e: any) => e.id === eventId));
+      assert.equal(
+        (await app.inject("/api/events?scope=invalid")).statusCode,
+        400,
+      );
     } finally {
       await app.close();
       await pool.end();
