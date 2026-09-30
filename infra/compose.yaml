@@ -1,0 +1,127 @@
+name: ticketjam-analytics
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.web
+    restart: unless-stopped
+    init: true
+    ports:
+      - "127.0.0.1:4381:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1/healthz]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+  backup:
+    image: postgres:18-bookworm
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    restart: unless-stopped
+    init: true
+    entrypoint: [sh, /scripts/backup-loop.sh]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - ../scripts/backup-once.sh:/scripts/backup-once.sh:ro
+      - ../scripts/backup-loop.sh:/scripts/backup-loop.sh:ro
+      - ../.local/backups:/backups
+    healthcheck:
+      test:
+        [
+          CMD-SHELL,
+          "find /backups -maxdepth 1 -name 'ticketjam-*.dump' -mmin -1560 | grep -q .",
+        ]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    command: ["./node_modules/.bin/tsx", "apps/api/server.ts"]
+    restart: unless-stopped
+    init: true
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://ticketjam:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/ticketjam
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN}
+      HOST: 0.0.0.0
+      PORT: 4381
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:4381/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    restart: unless-stopped
+    init: true
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://ticketjam:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/ticketjam
+      MAX_ACTIVE_EVENTS: ${MAX_ACTIVE_EVENTS:-5}
+    healthcheck:
+      test: [CMD, ./node_modules/.bin/tsx, scripts/worker-health.ts]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+  db:
+    image: postgres:18-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ticketjam
+      POSTGRES_DB: ticketjam
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U ticketjam -d ticketjam]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+volumes:
+  postgres-data:

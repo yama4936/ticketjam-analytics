@@ -1,0 +1,127 @@
+export interface Group {
+  id: string;
+  name: string;
+  enabled: boolean;
+}
+export interface EventSummary {
+  id: string;
+  title: string;
+  starts_at: string;
+  venue: string;
+  source_url: string;
+  groups: Group[] | null;
+  listing_count: number | null;
+  ticket_count: number | null;
+  median_price_yen: number | null;
+  min_price_yen: number | null;
+  observed_at: string | null;
+  complete: boolean | null;
+  latest_status: string | null;
+}
+export interface EventIndex {
+  events: EventSummary[];
+  scope: {
+    candidates: number;
+    monitored: number;
+    observation_started_at: string | null;
+    source_blocked: boolean | null;
+  };
+}
+export interface Observation {
+  id: string;
+  listing_id: string;
+  price_yen: number;
+  quantity: number;
+  admission_raw: string;
+  ticket_type: string | null;
+  state: string;
+  observed_at: string;
+  first_observed_at: string;
+  url: string;
+  admission_kind: string;
+  admission_prefix: string | null;
+  admission_lower: number | null;
+  admission_upper: number | null;
+}
+export interface TimelinePoint {
+  runId: string;
+  time: string;
+  scheduledAt: string;
+  status: string;
+  warnings: string[];
+  error: string | null;
+  listingCount: number | null;
+  ticketCount: number | null;
+  minPrice: number | null;
+  medianPrice: number | null;
+  newCount: number | null;
+}
+export interface Change {
+  asking_price_yen: number | null;
+  confirmed_sale_price_yen: number | null;
+  admission_lower: number | null;
+  admission_prefix: string | null;
+  id: string;
+  kind: string;
+  interval_start: string | null;
+  interval_end: string;
+  before_value: unknown;
+  after_value: unknown;
+  first_observed_at: string;
+}
+export interface Official {
+  id: string;
+  name: string;
+  face_value_yen: number | null;
+  fee_yen: number | null;
+  drink_yen: number | null;
+  source_url: string;
+  checked_at: string;
+  review_status: string;
+  admission_prefix: string | null;
+  sale_windows:
+    | {
+        id: string;
+        name: string;
+        starts_at: string | null;
+        ends_at: string | null;
+        face_value_yen: number | null;
+        fee_yen: number | null;
+      }[]
+    | null;
+}
+export interface Detail {
+  event: EventSummary;
+  types: string[];
+  official: Official[];
+  listings: Observation[];
+  timeline: TimelinePoint[];
+  changes: Change[];
+  summary: {
+    listingCount: number | null;
+    ticketCount: number | null;
+    minPrice: number | null;
+    medianPrice: number | null;
+  };
+  histogram: { lower: number; upper: number; count: number }[];
+  latestStatus: string;
+  truncated: boolean;
+  capabilities: { soldConfirmation: boolean };
+}
+
+export interface Comparison {
+  rows: {
+    event_id: string;
+    title: string;
+    starts_at: string;
+    observed_at: string;
+    status: string;
+    groups: string[] | null;
+    segment: string;
+    listing_count: number;
+    ticket_count: number;
+    min_price_yen: number | null;
+    median_price_yen: number | null;
+  }[];
+  truncated: boolean;
+}
