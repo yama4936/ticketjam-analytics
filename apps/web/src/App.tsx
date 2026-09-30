@@ -215,7 +215,7 @@ export function App() {
           データを再読込
         </button>
       </header>
-      <main>
+      <main className={selected ? "has-event" : ""}>
         <div className="intro">
           <div>
             <span className="eyebrow">ヒロインズ チケット観測室</span>
@@ -361,6 +361,14 @@ export function App() {
             </p>
           </aside>
           <section className="analysis-area" aria-live="polite">
+            {selected && (
+              <button
+                className="refresh change-event"
+                onClick={() => choose("")}
+              >
+                ← 公演を選び直す
+              </button>
+            )}
             {!selected ? (
               <>
                 {showComparison && (

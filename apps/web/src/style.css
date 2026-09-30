@@ -932,3 +932,20 @@ footer strong {
     grid-template-columns: 1fr;
   }
 }
+
+.change-event {
+  display: none;
+}
+@media (max-width: 720px) {
+  .has-event .intro,
+  .workspace:not(.browse) > .events-panel {
+    display: none;
+  }
+  .change-event {
+    display: inline-block;
+    margin-bottom: 20px;
+  }
+  .browse .event-family .event-card {
+    min-width: 0;
+  }
+}
