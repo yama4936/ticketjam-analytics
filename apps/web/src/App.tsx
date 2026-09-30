@@ -12,6 +12,7 @@ const date = (value: string | null | undefined) =>
   value
     ? new Date(value).toLocaleString("ja-JP", {
         timeZone: "Asia/Tokyo",
+        year: "numeric",
         month: "numeric",
         day: "numeric",
         hour: "2-digit",
@@ -75,7 +76,10 @@ export function App() {
     [detailError, setDetailError] = useState(""),
     [detailLoading, setDetailLoading] = useState(false),
     [refresh, setRefresh] = useState(0),
-    [tab, setTab] = useState("analysis");
+    [tab, setTab] = useState("listings");
+  const [snapshot, setSnapshot] = useState("");
+  const [eventScope, setEventScope] = useState("upcoming");
+  const [showComparison, setShowComparison] = useState(false);
   useEffect(() => {
     const c = new AbortController();
     get<{ groups: Group[] }>("/api/groups", c.signal)
@@ -89,7 +93,7 @@ export function App() {
     const c = new AbortController();
     const timer = setTimeout(() => {
       setError("");
-      const p = new URLSearchParams({ q: query });
+      const p = new URLSearchParams({ q: query, scope: eventScope });
       if (group) p.set("group", group);
       get<EventIndex>(`/api/events?${p}`, c.signal)
         .then(setIndex)
@@ -101,7 +105,7 @@ export function App() {
       clearTimeout(timer);
       c.abort();
     };
-  }, [group, query, refresh]);
+  }, [group, query, refresh, eventScope]);
   useEffect(() => {
     if (!selected) {
       setDetail(null);
@@ -120,6 +124,7 @@ export function App() {
       lower,
       upper,
       officialType,
+      snapshot,
     }))
       if (v) p.set(k, v);
     const timer = setTimeout(() => {
@@ -136,7 +141,17 @@ export function App() {
       clearTimeout(timer);
       c.abort();
     };
-  }, [selected, type, prefix, lower, upper, days, refresh, officialType]);
+  }, [
+    selected,
+    type,
+    prefix,
+    lower,
+    upper,
+    days,
+    refresh,
+    officialType,
+    snapshot,
+  ]);
   useEffect(() => {
     const fn = () =>
       choose(new URLSearchParams(location.search).get("event") ?? "", false);
@@ -156,15 +171,25 @@ export function App() {
     const url = new URL(location.href);
     id ? url.searchParams.set("event", id) : url.searchParams.delete("event");
     if (pushHistory) history.pushState({}, "", url);
-    setTab("analysis");
+    setTab("listings");
+    setSnapshot("");
   }
   const visibleEvents =
     index?.events.filter(
       (e) =>
-        !purpose ||
-        e.purpose === purpose ||
-        e.price_groups?.some((g) => g.purpose === purpose),
+        (eventScope === "past"
+          ? new Date(e.starts_at).getTime() < Date.now()
+          : new Date(e.starts_at).getTime() >= Date.now()) &&
+        (!purpose ||
+          e.purpose === purpose ||
+          e.price_groups?.some((g) => g.purpose === purpose)),
     ) ?? [];
+  const eventFamilies = new Map<string, typeof visibleEvents>();
+  for (const event of visibleEvents)
+    eventFamilies.set(event.title, [
+      ...(eventFamilies.get(event.title) ?? []),
+      event,
+    ]);
   const selectedOfficial = detail?.official.find((o) => o.id === officialType);
   const selectedSale =
     selectedOfficial?.sale_windows?.find((w) => w.id === saleWindow) ??
@@ -194,12 +219,10 @@ export function App() {
         <div className="intro">
           <div>
             <span className="eyebrow">ヒロインズ チケット観測室</span>
-            <h1>
-              チケットの動きを、
-              <br className="mobile-break" />
-              データで見る。
-            </h1>
-            <p>同じ用途・部・券種で、出品価格と定価を比較します。</p>
+            <h1>公演から、チケットを探す。</h1>
+            <p>
+              公演・日時を選び、前物販・特典会・ライブなどの券種別に出品を確認できます。
+            </p>
           </div>
           <div className="scope">
             <strong>
@@ -233,12 +256,22 @@ export function App() {
               <a href="/admin">管理画面で確認</a>
             </div>
           )}
-        <div className="workspace">
+        <div className={`workspace ${selected ? "" : "browse"}`}>
           <aside className="events-panel">
             <div className="section-heading">
-              <h2>公演を探す</h2>
-              <span>{visibleEvents.length}</span>
+              <h2>1. 公演を選ぶ</h2>
+              <span>{eventFamilies.size}公演</span>
             </div>
+            <label>
+              公演の期間
+              <select
+                value={eventScope}
+                onChange={(e) => setEventScope(e.target.value)}
+              >
+                <option value="upcoming">開催予定の公演</option>
+                <option value="past">過去の公演</option>
+              </select>
+            </label>
             <label>
               グループ
               <select value={group} onChange={(e) => setGroup(e.target.value)}>
@@ -286,56 +319,40 @@ export function App() {
               <div className="empty small">該当する公演はありません。</div>
             ) : (
               <div className="event-list">
-                {visibleEvents.map((e) => (
-                  <button
-                    key={e.id}
-                    className={`event-card ${selected === e.id ? "selected" : ""}`}
-                    onClick={() => choose(e.id)}
-                    aria-pressed={selected === e.id}
-                  >
-                    <span className="event-date">{date(e.starts_at)} JST</span>
-                    <span className="ticket-purpose">{e.purpose}</span>
-                    <strong>
-                      {e.session_label && e.session_label !== e.venue
-                        ? e.session_label
-                        : e.title}
-                    </strong>
-                    {e.session_label && e.session_label !== e.venue && (
-                      <span className="event-original-title">{e.title}</span>
-                    )}
-                    <span className="venue">{e.venue}</span>
-                    <div className="event-bottom">
-                      <span>{e.listing_count ?? "—"}件の出品</span>
-                      <span
-                        className={`tag ${e.latest_status === "complete" ? "" : "caution"}`}
+                {[...eventFamilies].map(([title, events]) => (
+                  <article className="event-family" key={title}>
+                    <h3>{title}</h3>
+                    <p className="muted">{events.length}枠 · 日時・部を選択</p>
+                    {events.map((e) => (
+                      <button
+                        key={e.id}
+                        className={`event-card ${selected === e.id ? "selected" : ""}`}
+                        onClick={() => choose(e.id)}
+                        aria-pressed={selected === e.id}
                       >
-                        {status(e.latest_status)}
-                      </span>
-                    </div>
-                    <span className="card-cohorts">
-                      {e.price_groups?.map((g, i) => (
-                        <span className="card-cohort" key={i}>
-                          <b>
-                            {g.official_type_id
-                              ? g.segment
-                              : "券種・部の対応未確認"}
-                          </b>
-                          <span>
-                            {g.median_price_yen == null
-                              ? "価格集計対象外"
-                              : `中央値 ${money(g.median_price_yen)} / 定価 ${money(g.face_value_yen)}`}{" "}
-                            · {g.listing_count}件
-                          </span>
+                        <span className="event-date">
+                          {date(e.starts_at)} JST
                         </span>
-                      ))}
-                    </span>
-                  </button>
+                        {e.session_label && e.session_label !== e.venue && (
+                          <strong>{e.session_label}</strong>
+                        )}
+                        <span className="venue">{e.venue}</span>
+                        <div className="event-bottom">
+                          <span>{e.listing_count ?? "—"}件の出品</span>
+                          <span className="tag">{status(e.latest_status)}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </article>
                 ))}
               </div>
             )}
             <button
               className="refresh compare-button"
-              onClick={() => choose("")}
+              onClick={() => {
+                choose("");
+                setShowComparison((v) => !v);
+              }}
             >
               公演・券種を比較
             </button>
@@ -346,12 +363,14 @@ export function App() {
           <section className="analysis-area" aria-live="polite">
             {!selected ? (
               <>
-                <Comparison
-                  group={group}
-                  purpose={purpose}
-                  choose={choose}
-                  refreshVersion={refresh}
-                />
+                {showComparison && (
+                  <Comparison
+                    group={group}
+                    purpose={purpose}
+                    choose={choose}
+                    refreshVersion={refresh}
+                  />
+                )}
                 <div className="welcome panel">
                   <span className="eyebrow">START EXPLORING</span>
                   <h2>気になる公演を選んでください</h2>
@@ -359,9 +378,9 @@ export function App() {
                     価格の分布や整理番号ごとの違いを、実際に観測した出品から確認できます。
                   </p>
                   <div className="welcome-lines">
-                    <span>01　公演・券種で絞り込む</span>
-                    <span>02　価格と供給の推移を見る</span>
-                    <span>03　取得状況と出典を確認する</span>
+                    <span>01　公演と日時・部を選ぶ</span>
+                    <span>02　チケットの種類を選ぶ</span>
+                    <span>03　販売中の出品、過去の観測を見る</span>
                   </div>
                   <p className="muted">
                     履歴は観測開始後から蓄積されます。掲載終了は成約を意味しません。
@@ -385,7 +404,7 @@ export function App() {
                 )}
                 <div className="detail-heading">
                   <div>
-                    <span className="eyebrow">EVENT ANALYSIS</span>
+                    <span className="eyebrow">SELECT TICKET TYPE</span>
                     <span className="ticket-purpose">
                       {detail.event.purpose}
                     </span>
@@ -437,412 +456,487 @@ export function App() {
                   </div>
                 )}
                 <section className="panel cohort-panel">
-                  <h3>用途・部・公式券種ごとの価格</h3>
+                  <h3>2. チケットの種類を選ぶ</h3>
                   <p className="muted">
-                    前物販・特典会・ライブや、部・定価の違う券種をまとめて平均・中央値にしません。対応が不明な出品は価格集計の対象外です。
+                    定価や用途の異なる券種は分けて表示します。記載から判断できない出品は「券種・部の対応未確認」に残します。
                   </p>
-                  <div className="table-wrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>用途 / 券種</th>
-                          <th>定価（手数料別）</th>
-                          <th>出品中央値</th>
-                          <th>出品数</th>
-                          <th>分析</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {detail.priceGroups.map((g, i) => (
-                          <tr key={i}>
-                            <td>
-                              {g.purpose}
-                              <br />
-                              {g.segment}
-                            </td>
-                            <td>{money(g.face_value_yen)}</td>
-                            <td>{money(g.median_price_yen)}</td>
-                            <td>{g.listing_count}件</td>
-                            <td>
-                              {g.official_type_id ? (
-                                <button
-                                  className="text-button"
-                                  onClick={() => {
-                                    setOfficialType(g.official_type_id!);
-                                    setType("");
-                                    setPrefix("");
-                                    setLower("");
-                                    setUpper("");
-                                    setSaleWindow("");
-                                    setAxis("date");
-                                  }}
-                                >
-                                  この券種を分析
-                                </button>
-                              ) : (
-                                "対応未確認"
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="ticket-types">
+                    {[
+                      ...detail.official
+                        .filter((o) => o.review_status === "confirmed")
+                        .map((o) => ({
+                          id: o.id,
+                          name: o.name,
+                          face: o.face_value_yen,
+                          count: detail.priceGroups
+                            .filter((g) => g.official_type_id === o.id)
+                            .reduce((n, g) => n + g.listing_count, 0),
+                          purpose: o.purpose,
+                        })),
+                      {
+                        id: "unknown",
+                        name: "券種・部の対応未確認",
+                        face: null,
+                        purpose: "記載を個別に確認",
+                        count: detail.priceGroups
+                          .filter((g) => !g.official_type_id)
+                          .reduce((n, g) => n + g.listing_count, 0),
+                      },
+                    ].map((t) => (
+                      <button
+                        key={t.id}
+                        className={`ticket-type ${officialType === t.id ? "selected" : ""}`}
+                        aria-pressed={officialType === t.id}
+                        onClick={() => {
+                          setOfficialType(t.id);
+                          setType("");
+                          setPrefix("");
+                          setLower("");
+                          setUpper("");
+                          setSaleWindow("");
+                          setAxis("date");
+                          setTab("listings");
+                        }}
+                      >
+                        <span className="ticket-purpose">{t.purpose}</span>
+                        <strong>{t.name}</strong>
+                        <span>
+                          定価 {money(t.face)} / {t.count}件
+                        </span>
+                      </button>
+                    ))}
                   </div>
                 </section>
-                <div className="filterbar">
-                  <label>
-                    券種
-                    <select
-                      value={type}
-                      onChange={(e) => setType(e.target.value)}
-                    >
-                      <option value="">すべて / 不明を含む</option>
-                      {detail.types.map((t) => (
-                        <option key={t}>{t}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    番号の接頭辞
-                    <input
-                      placeholder="A / B / S"
-                      value={prefix}
-                      maxLength={3}
-                      onChange={(e) => setPrefix(e.target.value.toUpperCase())}
-                    />
-                  </label>
-                  <label>
-                    番号の下限
-                    <input
-                      type="number"
-                      min="1"
-                      value={lower}
-                      onChange={(e) => setLower(e.target.value)}
-                      placeholder="1"
-                    />
-                  </label>
-                  <label>
-                    上限
-                    <input
-                      type="number"
-                      min="1"
-                      value={upper}
-                      onChange={(e) => setUpper(e.target.value)}
-                      placeholder="100"
-                    />
-                  </label>
-                  <label>
-                    比較する公式券種
-                    <select
-                      value={officialType}
-                      onChange={(e) => {
-                        setOfficialType(e.target.value);
-                        setSaleWindow("");
-                        setAxis("date");
-                      }}
-                    >
-                      <option value="">券種を選択（混合集計なし）</option>
-                      {detail.official
-                        .filter((o) => o.review_status === "confirmed")
-                        .map((o) => (
-                          <option key={o.id} value={o.id}>
-                            {o.name} / 定価 {money(o.face_value_yen)}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                  <label>
-                    期間
-                    <select
-                      value={days}
-                      onChange={(e) => setDays(e.target.value)}
-                    >
-                      <option value="7">7日</option>
-                      <option value="30">30日</option>
-                      <option value="90">90日</option>
-                      <option value="365">1年</option>
-                    </select>
-                  </label>
-                </div>
-                <div className="metrics">
-                  <div>
-                    <span>出品価格の中央値</span>
-                    <strong>{money(detail.summary.medianPrice)}</strong>
-                    <small>
-                      {detail.priceComparable
-                        ? "選択した同一券種のみ / 1枚あたり"
-                        : "公式券種を選択してください"}
-                    </small>
-                  </div>
-                  <div>
-                    <span>最安値</span>
-                    <strong>{money(detail.summary.minPrice)}</strong>
-                    <small>
-                      {detail.priceComparable
-                        ? `定価 ${money(selectedOfficial?.face_value_yen)} / 手数料別`
-                        : "異なる券種は混ぜません"}
-                    </small>
-                  </div>
-                  <div>
-                    <span>出品件数</span>
-                    <strong>
-                      {detail.summary.listingCount ?? "—"}
-                      <small> 件</small>
-                    </strong>
-                    <small>選択条件の最新観測</small>
-                  </div>
-                  <div>
-                    <span>チケット枚数</span>
-                    <strong>
-                      {detail.summary.ticketCount ?? "—"}
-                      <small> 枚</small>
-                    </strong>
-                    <small>出品件数とは別に集計</small>
-                  </div>
-                </div>
-                <nav className="tabs" aria-label="分析表示">
-                  <button
-                    className={tab === "analysis" ? "active" : ""}
-                    onClick={() => setTab("analysis")}
-                  >
-                    グラフ
-                  </button>
-                  <button
-                    className={tab === "listings" ? "active" : ""}
-                    onClick={() => setTab("listings")}
-                  >
-                    観測した出品
-                  </button>
-                  <button
-                    className={tab === "quality" ? "active" : ""}
-                    onClick={() => setTab("quality")}
-                  >
-                    取得状況・公式情報
-                  </button>
-                </nav>
-                {tab === "analysis" && (
+                {officialType ? (
                   <>
-                    <div className="graph-controls">
+                    <section className="panel history-controls">
+                      <h3>
+                        3.{" "}
+                        {detail.view === "history"
+                          ? "過去の出品を見る"
+                          : "販売中の出品を見る"}
+                      </h3>
                       <label>
-                        時間軸
+                        表示する観測
                         <select
-                          value={axis}
-                          onChange={(e) => setAxis(e.target.value)}
+                          aria-label="表示する観測"
+                          value={snapshot}
+                          onChange={(e) => setSnapshot(e.target.value)}
                         >
-                          <option value="date">観測日時</option>
-                          <option value="remaining">公演までの残り時間</option>
-                          <option
-                            value="release"
-                            disabled={!selectedSale?.starts_at}
-                          >
-                            公式発売からの経過時間
+                          <option value="">
+                            {new Date(detail.event.starts_at).getTime() <
+                            Date.now()
+                              ? "最新の保存済み観測"
+                              : "販売中（最新の観測）"}
                           </option>
+                          {detail.snapshots.map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {date(r.observed_at)} JST · {status(r.status)}
+                            </option>
+                          ))}
                         </select>
                       </label>
-                      {selectedOfficial && (
-                        <label>
-                          比較する販売期間
-                          <select
-                            value={selectedSale?.id ?? ""}
-                            onChange={(e) => {
-                              setSaleWindow(e.target.value);
-                              if (
-                                !selectedOfficial.sale_windows?.find(
-                                  (w) => w.id === e.target.value,
-                                )?.starts_at
-                              )
-                                setAxis("date");
-                            }}
-                          >
-                            {selectedOfficial.sale_windows?.map((w) => (
-                              <option key={w.id} value={w.id}>
-                                {w.name} / {date(w.starts_at)}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      )}
-                      <span>金額は成約価格ではなく出品価格です。</span>
-                    </div>
-                    <Suspense
-                      fallback={
-                        <div className="loading">グラフを読み込み中…</div>
-                      }
-                    >
-                      {detailLoading ? (
-                        <div className="loading">
-                          条件に合うグラフを読み込み中…
-                        </div>
-                      ) : !detail.priceComparable ? (
-                        <p className="notice">
-                          上の表から同じ用途・部・公式券種を選択すると価格グラフを表示します。定価や対応が不明な出品の価格は集計しません。
-                        </p>
-                      ) : (
-                        <Charts
-                          data={detail}
-                          axis={axis}
-                          releasedAt={selectedSale?.starts_at ?? null}
-                          faceValue={
-                            selectedSale?.face_value_yen ??
-                            selectedOfficial?.face_value_yen ??
-                            null
+                      <p className="muted">
+                        {detail.view === "history"
+                          ? "選択した日時に掲載されていた出品です。現在の販売状況とは異なります。"
+                          : "最新観測時点で販売中だった出品です。現在の在庫はチケジャムで確認してください。"}{" "}
+                        観測日時: {date(detail.selectedSnapshot?.observed_at)}{" "}
+                        JST
+                      </p>
+                      {snapshot &&
+                        detail.selectedSnapshot?.status === "partial" && (
+                          <p className="notice">
+                            この日時は部分取得です。出品の全件を確認できていません。
+                          </p>
+                        )}
+                      <p className="muted">
+                        履歴は保存済みの観測から選べます。掲載終了は成約を意味しません。
+                      </p>
+                    </section>
+                    <div className="filterbar">
+                      <label>
+                        券種
+                        <select
+                          value={type}
+                          onChange={(e) => setType(e.target.value)}
+                        >
+                          <option value="">すべて / 不明を含む</option>
+                          {detail.types.map((t) => (
+                            <option key={t}>{t}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        番号の接頭辞
+                        <input
+                          placeholder="A / B / S"
+                          value={prefix}
+                          maxLength={3}
+                          onChange={(e) =>
+                            setPrefix(e.target.value.toUpperCase())
                           }
                         />
-                      )}
-                    </Suspense>
-                    <div className="changes panel">
-                      <h3>掲載状況の変化</h3>
-                      <div>
-                        <span>
-                          値下げ{" "}
-                          <b>
-                            {
-                              detail.changes.filter(
-                                (c) => c.kind === "price_drop",
-                              ).length
-                            }{" "}
-                            件
-                          </b>
-                        </span>
-                        <span>
-                          掲載終了・理由不明{" "}
-                          <b>
-                            {
-                              detail.changes.filter(
-                                (c) => c.kind === "ended_unknown",
-                              ).length
-                            }{" "}
-                            件
-                          </b>
-                        </span>
-                        <span>
-                          成約確認 <b>公開情報から未確認</b>
-                        </span>
-                      </div>
-                      <p>
-                        掲載終了や枚数の減少だけでは、売れたと判断しません。成約時刻・価格の分析は、明示的に確認できる情報に限定します。
-                      </p>
+                      </label>
+                      <label>
+                        番号の下限
+                        <input
+                          type="number"
+                          min="1"
+                          value={lower}
+                          onChange={(e) => setLower(e.target.value)}
+                          placeholder="1"
+                        />
+                      </label>
+                      <label>
+                        上限
+                        <input
+                          type="number"
+                          min="1"
+                          value={upper}
+                          onChange={(e) => setUpper(e.target.value)}
+                          placeholder="100"
+                        />
+                      </label>
+                      <label>
+                        比較する公式券種
+                        <select
+                          value={officialType}
+                          onChange={(e) => {
+                            setOfficialType(e.target.value);
+                            setSaleWindow("");
+                            setAxis("date");
+                          }}
+                        >
+                          <option value="">券種を選択（混合集計なし）</option>
+                          <option value="unknown">券種・部の対応未確認</option>
+                          {detail.official
+                            .filter((o) => o.review_status === "confirmed")
+                            .map((o) => (
+                              <option key={o.id} value={o.id}>
+                                {o.name} / 定価 {money(o.face_value_yen)}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                      <label>
+                        期間
+                        <select
+                          value={days}
+                          onChange={(e) => setDays(e.target.value)}
+                        >
+                          <option value="7">7日</option>
+                          <option value="30">30日</option>
+                          <option value="90">90日</option>
+                          <option value="365">1年</option>
+                        </select>
+                      </label>
                     </div>
-                  </>
-                )}
-                {tab === "listings" && (
-                  <section className="panel">
-                    <h3>
-                      最新観測の出品 <small>{detail.listings.length} 件</small>
-                    </h3>
-                    <div className="table-wrap">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>整理番号・席種の記載</th>
-                            <th>単価</th>
-                            <th>枚数</th>
-                            <th>初回観測</th>
-                            <th>出典</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {detail.listings.map((l) => (
-                            <tr key={l.id}>
-                              <td>
-                                {l.admission_raw || "記載なし"}
-                                <small className="cell-note">
-                                  {l.ticket_type ?? "券種未分類"}
-                                </small>
-                              </td>
-                              <td>{money(l.price_yen)}</td>
-                              <td>{l.quantity}</td>
-                              <td>{date(l.first_observed_at)}</td>
-                              <td>
-                                <a
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  href={l.url}
-                                >
-                                  出品を見る
-                                </a>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    {!detail.listings.length && (
-                      <div className="empty small">
-                        この条件の観測データはありません。
+                    {tab === "analysis" && (
+                      <div className="metrics">
+                        <div>
+                          <span>出品価格の中央値</span>
+                          <strong>{money(detail.summary.medianPrice)}</strong>
+                          <small>
+                            {detail.priceComparable
+                              ? "選択した同一券種のみ / 1枚あたり"
+                              : "公式券種を選択してください"}
+                          </small>
+                        </div>
+                        <div>
+                          <span>最安値</span>
+                          <strong>{money(detail.summary.minPrice)}</strong>
+                          <small>
+                            {detail.priceComparable
+                              ? `定価 ${money(selectedOfficial?.face_value_yen)} / 手数料別`
+                              : "異なる券種は混ぜません"}
+                          </small>
+                        </div>
+                        <div>
+                          <span>出品件数</span>
+                          <strong>
+                            {detail.summary.listingCount ?? "—"}
+                            <small> 件</small>
+                          </strong>
+                          <small>選択条件の最新観測</small>
+                        </div>
+                        <div>
+                          <span>チケット枚数</span>
+                          <strong>
+                            {detail.summary.ticketCount ?? "—"}
+                            <small> 枚</small>
+                          </strong>
+                          <small>出品件数とは別に集計</small>
+                        </div>
                       </div>
                     )}
-                    <p className="muted">
-                      初回観測日時は出品日時ではありません。番号帯の絞り込みは、記載された範囲との重なりで判定します。
-                    </p>
-                  </section>
-                )}
-                {tab === "quality" && (
-                  <>
-                    <section className="panel">
-                      <h3>公式の販売情報</h3>
-                      {!detail.official.length ? (
+                    <nav className="tabs" aria-label="分析表示">
+                      <button
+                        className={tab === "analysis" ? "active" : ""}
+                        onClick={() => setTab("analysis")}
+                      >
+                        グラフ
+                      </button>
+                      <button
+                        className={tab === "listings" ? "active" : ""}
+                        onClick={() => setTab("listings")}
+                      >
+                        出品一覧
+                      </button>
+                      <button
+                        className={tab === "quality" ? "active" : ""}
+                        onClick={() => setTab("quality")}
+                      >
+                        取得状況・公式情報
+                      </button>
+                    </nav>
+                    {tab === "analysis" && (
+                      <>
+                        <div className="graph-controls">
+                          <label>
+                            時間軸
+                            <select
+                              value={axis}
+                              onChange={(e) => setAxis(e.target.value)}
+                            >
+                              <option value="date">観測日時</option>
+                              <option value="remaining">
+                                公演までの残り時間
+                              </option>
+                              <option
+                                value="release"
+                                disabled={!selectedSale?.starts_at}
+                              >
+                                公式発売からの経過時間
+                              </option>
+                            </select>
+                          </label>
+                          {selectedOfficial && (
+                            <label>
+                              比較する販売期間
+                              <select
+                                value={selectedSale?.id ?? ""}
+                                onChange={(e) => {
+                                  setSaleWindow(e.target.value);
+                                  if (
+                                    !selectedOfficial.sale_windows?.find(
+                                      (w) => w.id === e.target.value,
+                                    )?.starts_at
+                                  )
+                                    setAxis("date");
+                                }}
+                              >
+                                {selectedOfficial.sale_windows?.map((w) => (
+                                  <option key={w.id} value={w.id}>
+                                    {w.name} / {date(w.starts_at)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          )}
+                          <span>金額は成約価格ではなく出品価格です。</span>
+                        </div>
+                        <Suspense
+                          fallback={
+                            <div className="loading">グラフを読み込み中…</div>
+                          }
+                        >
+                          {detailLoading ? (
+                            <div className="loading">
+                              条件に合うグラフを読み込み中…
+                            </div>
+                          ) : !detail.priceComparable ? (
+                            <p className="notice">
+                              上の表から同じ用途・部・公式券種を選択すると価格グラフを表示します。定価や対応が不明な出品の価格は集計しません。
+                            </p>
+                          ) : (
+                            <Charts
+                              data={detail}
+                              axis={axis}
+                              releasedAt={selectedSale?.starts_at ?? null}
+                              faceValue={
+                                selectedSale?.face_value_yen ??
+                                selectedOfficial?.face_value_yen ??
+                                null
+                              }
+                            />
+                          )}
+                        </Suspense>
+                        <div className="changes panel">
+                          <h3>掲載状況の変化</h3>
+                          <div>
+                            <span>
+                              値下げ{" "}
+                              <b>
+                                {
+                                  detail.changes.filter(
+                                    (c) => c.kind === "price_drop",
+                                  ).length
+                                }{" "}
+                                件
+                              </b>
+                            </span>
+                            <span>
+                              掲載終了・理由不明{" "}
+                              <b>
+                                {
+                                  detail.changes.filter(
+                                    (c) => c.kind === "ended_unknown",
+                                  ).length
+                                }{" "}
+                                件
+                              </b>
+                            </span>
+                            <span>
+                              成約確認 <b>公開情報から未確認</b>
+                            </span>
+                          </div>
+                          <p>
+                            掲載終了や枚数の減少だけでは、売れたと判断しません。成約時刻・価格の分析は、明示的に確認できる情報に限定します。
+                          </p>
+                        </div>
+                      </>
+                    )}
+                    {tab === "listings" && (
+                      <section className="panel">
+                        <h3>
+                          {detail.view === "history"
+                            ? "選択日時の出品"
+                            : "販売中の出品（最新観測）"}{" "}
+                          <small>{detail.listings.length} 件</small>
+                        </h3>
+                        <div className="table-wrap">
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>整理番号・席種の記載</th>
+                                <th>単価</th>
+                                <th>枚数</th>
+                                <th>初回観測</th>
+                                <th>出典</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {detail.listings.map((l) => (
+                                <tr key={l.id}>
+                                  <td>
+                                    {l.admission_raw || "記載なし"}
+                                    <small className="cell-note">
+                                      {l.ticket_type ?? "券種未分類"}
+                                    </small>
+                                  </td>
+                                  <td>{money(l.price_yen)}</td>
+                                  <td>{l.quantity}</td>
+                                  <td>{date(l.first_observed_at)}</td>
+                                  <td>
+                                    <a
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      href={l.url}
+                                    >
+                                      出品を見る
+                                    </a>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        {!detail.listings.length && (
+                          <div className="empty small">
+                            この条件の観測データはありません。
+                          </div>
+                        )}
                         <p className="muted">
-                          公式ページとの対応づけは確認中です。定価・手数料・ドリンク代・発売日時は不明として扱い、推測で補いません。
+                          初回観測日時は出品日時ではありません。番号帯の絞り込みは、記載された範囲との重なりで判定します。
                         </p>
-                      ) : (
-                        detail.official.map((o) => (
-                          <div key={o.id} className="official">
-                            <h4>{o.name}</h4>
-                            <p>
-                              定価 {money(o.face_value_yen)} / 手数料{" "}
-                              {money(o.fee_yen)} / ドリンク代{" "}
-                              {money(o.drink_yen)}
+                      </section>
+                    )}
+                    {tab === "quality" && (
+                      <>
+                        <section className="panel">
+                          <h3>公式の販売情報</h3>
+                          {!detail.official.length ? (
+                            <p className="muted">
+                              公式ページとの対応づけは確認中です。定価・手数料・ドリンク代・発売日時は不明として扱い、推測で補いません。
                             </p>
-                            <p>
-                              {o.sale_windows
-                                ?.map((w) => `${w.name} ${date(w.starts_at)}`)
-                                .join(" · ")}
-                            </p>
+                          ) : (
+                            detail.official.map((o) => (
+                              <div key={o.id} className="official">
+                                <h4>{o.name}</h4>
+                                <p>
+                                  定価 {money(o.face_value_yen)} / 手数料{" "}
+                                  {money(o.fee_yen)} / ドリンク代{" "}
+                                  {money(o.drink_yen)}
+                                </p>
+                                <p>
+                                  {o.sale_windows
+                                    ?.map(
+                                      (w) => `${w.name} ${date(w.starts_at)}`,
+                                    )
+                                    .join(" · ")}
+                                </p>
+                                <a
+                                  href={o.source_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  公式販売ページ
+                                </a>
+                                <span> 確認 {date(o.checked_at)}</span>
+                              </div>
+                            ))
+                          )}
+                        </section>
+                        <section className="panel">
+                          <h3>観測の記録</h3>
+                          <p>
                             <a
-                              href={o.source_url}
+                              href={`https://web.archive.org/web/*/${detail.event.source_url}`}
                               target="_blank"
                               rel="noreferrer"
                             >
-                              公式販売ページ
+                              Internet Archiveの保存ページを確認 ↗
                             </a>
-                            <span> 確認 {date(o.checked_at)}</span>
-                          </div>
-                        ))
-                      )}
-                    </section>
-                    <section className="panel">
-                      <h3>観測の記録</h3>
-                      <div className="table-wrap">
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>予定日時</th>
-                              <th>実観測</th>
-                              <th>状態</th>
-                              <th>取得した出品</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {detail.timeline
-                              .slice()
-                              .reverse()
-                              .map((t) => (
-                                <tr key={t.runId}>
-                                  <td>{date(t.scheduledAt)}</td>
-                                  <td>{date(t.time)}</td>
-                                  <td>{status(t.status)}</td>
-                                  <td>{t.listingCount ?? "—"}</td>
+                          </p>
+                          <p className="muted">
+                            保存されている場合は、観測開始前のページも確認できます。アーカイブの内容はこのサイトの出品履歴にはまだ取り込んでいません。
+                          </p>
+                          <div className="table-wrap">
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>予定日時</th>
+                                  <th>実観測</th>
+                                  <th>状態</th>
+                                  <th>取得した出品</th>
                                 </tr>
-                              ))}
-                          </tbody>
-                        </table>
-                      </div>
-                      <p className="muted">
-                        取得漏れは0件として埋めません。部分取得の時間帯は、公演全体の相場を表していない場合があります。
-                      </p>
-                    </section>
+                              </thead>
+                              <tbody>
+                                {detail.timeline
+                                  .slice()
+                                  .reverse()
+                                  .map((t) => (
+                                    <tr key={t.runId}>
+                                      <td>{date(t.scheduledAt)}</td>
+                                      <td>{date(t.time)}</td>
+                                      <td>{status(t.status)}</td>
+                                      <td>{t.listingCount ?? "—"}</td>
+                                    </tr>
+                                  ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          <p className="muted">
+                            取得漏れは0件として埋めません。部分取得の時間帯は、公演全体の相場を表していない場合があります。
+                          </p>
+                        </section>
+                      </>
+                    )}
                   </>
+                ) : (
+                  <div className="empty panel">
+                    チケットの種類を選ぶと、出品一覧を表示します。
+                  </div>
                 )}
               </>
             )}

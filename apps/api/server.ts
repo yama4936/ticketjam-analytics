@@ -25,7 +25,8 @@ const filters = z
     lower: z.coerce.number().int().min(1).max(999999).optional(),
     upper: z.coerce.number().int().min(1).max(999999).optional(),
     days: z.coerce.number().int().min(1).max(365).default(30),
-    officialType: z.string().uuid().optional(),
+    officialType: z.union([z.string().uuid(), z.literal("unknown")]).optional(),
+    snapshot: z.string().uuid().optional(),
   })
   .refine(
     (x) => x.lower === undefined || x.upper === undefined || x.lower <= x.upper,
@@ -97,6 +98,7 @@ export async function buildServer(pool: pg.Pool) {
       .object({
         group: z.string().uuid().optional(),
         q: z.string().max(100).default(""),
+        scope: z.enum(["all", "upcoming", "past"]).default("all"),
       })
       .parse(request.query);
     const events = (
@@ -111,8 +113,9 @@ export async function buildServer(pool: pg.Pool) {
       LEFT JOIN LATERAL(SELECT * FROM event_metrics WHERE event_id=e.id ORDER BY observed_at DESC LIMIT 1)m ON true
       LEFT JOIN LATERAL(SELECT status,error FROM collection_runs WHERE source_event_id=s.id ORDER BY scheduled_at DESC LIMIT 1)r ON true
       WHERE ($1::uuid IS NULL OR EXISTS(SELECT 1 FROM event_groups WHERE event_id=e.id AND group_id=$1)) AND e.title ILIKE $2
-      ORDER BY e.starts_at ASC LIMIT 200`,
-        [q.group ?? null, `%${q.q}%`],
+      AND ($3='all' OR ($3='past' AND e.starts_at<now()) OR ($3='upcoming' AND e.starts_at>=now()))
+      ORDER BY CASE WHEN $3='past' THEN e.starts_at END DESC,e.starts_at ASC LIMIT 200`,
+        [q.group ?? null, `%${q.q}%`, q.scope],
       )
     ).rows;
     const cohorts = await priceCohorts(pool, q.group ?? null);
@@ -142,6 +145,21 @@ export async function buildServer(pool: pg.Pool) {
       )
     ).rows[0];
     if (!event) return reply.code(404).send({ error: "公演が見つかりません" });
+    const snapshots = (
+      await pool.query(
+        `SELECT r.id,coalesce(r.completed_at,r.started_at) AS observed_at,r.status
+       FROM collection_runs r JOIN source_events s ON s.id=r.source_event_id
+       WHERE s.event_id=$1 AND r.status IN ('complete','partial') ORDER BY r.scheduled_at DESC`,
+        [id],
+      )
+    ).rows;
+    const selectedSnapshot = f.snapshot
+      ? snapshots.find((r) => r.id === f.snapshot)
+      : snapshots[0];
+    if (f.snapshot && !selectedSnapshot)
+      return reply
+        .code(404)
+        .send({ error: "この公演の保存済み観測が見つかりません" });
     const args = [
       id,
       NORMALIZATION_VERSION,
@@ -154,16 +172,16 @@ export async function buildServer(pool: pg.Pool) {
     ];
     const condition = `($3::text IS NULL OR n.ticket_type=$3) AND ($4::text IS NULL OR n.admission_prefix=$4)
       AND ($5::int IS NULL OR n.admission_upper>=$5) AND ($6::int IS NULL OR n.admission_lower<=$6)
-      AND ($8::uuid IS NULL OR matched_ticket_type_v1(l.event_id,o.admission_raw,n.ticket_type,n.admission_prefix)=$8)`;
+      AND ($8::text IS NULL OR CASE WHEN $8='unknown' THEN matched_ticket_type_v1(l.event_id,o.admission_raw,n.ticket_type,n.admission_prefix) IS NULL
+      ELSE matched_ticket_type_v1(l.event_id,o.admission_raw,n.ticket_type,n.admission_prefix)::text=$8 END)`;
     const observations = (
       await pool.query(
         `SELECT o.*,l.url,l.first_observed_at,n.admission_kind,n.admission_prefix,n.admission_lower,n.admission_upper,n.ticket_type
       FROM listing_observations o JOIN listings l ON l.id=o.listing_id
       LEFT JOIN observation_normalizations n ON n.observation_id=o.id AND n.version=$2
-      WHERE l.event_id=$1 AND ${condition} AND o.run_id=(SELECT r.id FROM collection_runs r JOIN source_events s ON s.id=r.source_event_id
-        WHERE s.event_id=$1 AND r.status IN ('complete','partial') AND r.scheduled_at>now()-$7::int*interval '1 day' ORDER BY r.scheduled_at DESC LIMIT 1)
+      WHERE l.event_id=$1 AND ${condition} AND o.state='listed' AND o.run_id=$9::uuid AND $7::int IS NOT NULL
       ORDER BY o.price_yen,o.id LIMIT 5000`,
-        args,
+        [...args, selectedSnapshot?.id ?? null],
       )
     ).rows;
     const runs = (
@@ -175,8 +193,8 @@ export async function buildServer(pool: pg.Pool) {
     ).rows;
     const aggregateRows = (
       await pool.query(
-        `SELECT o.run_id,count(*)::int AS listing_count,sum(o.quantity)::int AS ticket_count,CASE WHEN $8::uuid IS NOT NULL THEN min(o.price_yen) END AS min_price,
-      CASE WHEN $8::uuid IS NOT NULL THEN percentile_cont(0.5) WITHIN GROUP(ORDER BY o.price_yen) END AS median_price,
+        `SELECT o.run_id,count(*)::int AS listing_count,sum(o.quantity)::int AS ticket_count,CASE WHEN ($8::text IS NOT NULL AND $8 <> 'unknown') THEN min(o.price_yen) END AS min_price,
+      CASE WHEN ($8::text IS NOT NULL AND $8 <> 'unknown') THEN percentile_cont(0.5) WITHIN GROUP(ORDER BY o.price_yen) END AS median_price,
       count(*) FILTER(WHERE l.first_observed_at=o.observed_at)::int AS new_count
       FROM listing_observations o JOIN listings l ON l.id=o.listing_id
       LEFT JOIN observation_normalizations n ON n.observation_id=o.id AND n.version=$2
@@ -215,12 +233,7 @@ export async function buildServer(pool: pg.Pool) {
       }),
       new Date(event.starts_at),
     );
-    const latestRun = runs
-      .filter((r) => ["complete", "partial"].includes(r.status))
-      .at(-1);
-    const listings = latestRun
-      ? observations.filter((o) => o.run_id === latestRun.id)
-      : [];
+    const listings = observations;
     const changes = (
       await pool.query(
         `SELECT c.*,l.first_observed_at,o.price_yen AS asking_price_yen,o.confirmed_sale_price_yen,n.admission_lower,n.admission_prefix FROM listing_changes c JOIN listings l ON l.id=c.listing_id
@@ -240,12 +253,19 @@ export async function buildServer(pool: pg.Pool) {
     const official = (
       await pool.query(
         `SELECT t.*,oe.source_url,oe.checked_at,oe.review_status,
+      official_ticket_purpose_v1((SELECT title FROM events WHERE id=t.event_id),oe.extracted_fields->>'stageName',t.name) AS purpose,
       (SELECT jsonb_agg(sw ORDER BY sw.starts_at) FROM sale_windows sw WHERE sw.ticket_type_id=t.id) AS sale_windows
       FROM ticket_types t JOIN official_evidence oe ON oe.id=t.evidence_id WHERE t.event_id=$1`,
         [id],
       )
     ).rows;
-    const priceGroups = await priceCohorts(pool, null, "type", id);
+    const priceGroups = await priceCohorts(
+      pool,
+      null,
+      "type",
+      id,
+      selectedSnapshot?.id ?? null,
+    );
     const priceComparable = !!official.find(
       (o) =>
         o.id === f.officialType &&
@@ -258,7 +278,18 @@ export async function buildServer(pool: pg.Pool) {
         point.medianPrice = null;
       }
     const listed = listings.filter((o) => o.state === "listed");
+    const prices = listed.map((o) => o.price_yen).sort((a, b) => a - b);
+    const middle = Math.floor(prices.length / 2);
+    const median = prices.length
+      ? (prices[middle] + prices[Math.floor((prices.length - 1) / 2)]) / 2
+      : null;
     return {
+      snapshots,
+      selectedSnapshot: selectedSnapshot ?? null,
+      view:
+        f.snapshot || new Date(event.starts_at).getTime() < Date.now()
+          ? "history"
+          : "current",
       event,
       priceGroups,
       priceComparable,
@@ -268,23 +299,14 @@ export async function buildServer(pool: pg.Pool) {
       listings,
       timeline,
       changes,
-      summary: latestRun
-        ? {
-            listingCount: aggregate.get(latestRun.id)?.listing_count ?? 0,
-            ticketCount: aggregate.get(latestRun.id)?.ticket_count ?? 0,
-            minPrice: priceComparable
-              ? (aggregate.get(latestRun.id)?.min_price ?? null)
-              : null,
-            medianPrice: priceComparable
-              ? (aggregate.get(latestRun.id)?.median_price ?? null)
-              : null,
-          }
-        : {
-            listingCount: null,
-            ticketCount: null,
-            minPrice: null,
-            medianPrice: null,
-          },
+      summary: {
+        listingCount: selectedSnapshot ? listed.length : null,
+        ticketCount: selectedSnapshot
+          ? listed.reduce((sum, o) => sum + o.quantity, 0)
+          : null,
+        minPrice: priceComparable ? (prices[0] ?? null) : null,
+        medianPrice: priceComparable ? median : null,
+      },
       histogram: priceComparable
         ? histogram(listed.map((o) => o.price_yen))
         : [],

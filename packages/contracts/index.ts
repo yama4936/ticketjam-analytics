@@ -83,6 +83,7 @@ export interface Change {
   first_observed_at: string;
 }
 export interface Official {
+  purpose: string;
   id: string;
   name: string;
   face_value_yen: number | null;
@@ -104,6 +105,9 @@ export interface Official {
     | null;
 }
 export interface Detail {
+  snapshots: { id: string; observed_at: string; status: string }[];
+  selectedSnapshot: { id: string; observed_at: string; status: string } | null;
+  view: "current" | "history";
   priceGroups: PriceGroup[];
   priceComparable: boolean;
   event: EventSummary;

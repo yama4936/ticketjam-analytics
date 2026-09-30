@@ -41,35 +41,62 @@ try {
     "open",
     base,
   );
-  await until(
-    "document.querySelectorAll('.event-card').length >= 2 && document.querySelector('.analysis-area table')",
+  await until("document.querySelectorAll('.event-card').length >= 2");
+  assert.equal(
+    await evaluate("!!document.querySelector('.analysis-area table')"),
+    false,
   );
-  await browser("snapshot", "-i");
+  pass("Event-first landing has no mixed price table");
+  await browser("click", ".compare-button");
+  await until("document.querySelector('.analysis-area table')");
   await evaluate("performance.clearResourceTimings()");
   await browser("click", ".topbar button");
   await until(
     "performance.getEntriesByType('resource').some(e=>e.name.includes('/api/comparison'))",
   );
-  pass("Comparison reload requests fresh data");
+  pass("Optional comparison reload requests fresh data");
   await browser(
     "fill",
     "input[placeholder='公演を検索']",
     "no-such-event-890123",
   );
-  await until(
-    "document.querySelector('.events-panel .empty')?.textContent.includes('該当する公演')",
-  );
+  await until("document.querySelector('.events-panel .empty')");
   await browser("click", "input[placeholder='公演を検索']");
   await browser("press", "Control+a");
   await browser("press", "Backspace");
   await until("document.querySelectorAll('.event-card').length >= 2");
   pass("Search empty result and recovery");
-  await browser("click", ".event-card:first-child");
-  await until("document.querySelector('.filterbar')");
+  await evaluate("document.querySelector('.event-card').click()");
+  await until("document.querySelector('.ticket-type')");
+  assert.equal(await evaluate("!!document.querySelector('.filterbar')"), false);
   const firstUrl = await evaluate("location.href");
-  await browser("click", ".event-card:first-child");
-  await until("document.querySelector('.filterbar')");
-  pass("Reselecting current event preserves loaded detail");
+  await evaluate("document.querySelector('.ticket-type').click()");
+  await until(
+    "document.querySelector('.history-controls') && !document.querySelector('[role=status]')",
+  );
+  assert.ok(
+    await evaluate(
+      "document.querySelector('.tabs button:nth-child(2)').classList.contains('active')",
+    ),
+  );
+  pass("Event then ticket type opens current listings by default");
+  const historyId = await evaluate(
+    "document.querySelector('.history-controls select').options[2]?.value",
+  );
+  assert.ok(historyId, "Need at least two observations to verify history");
+  await browser("select", ".history-controls select", historyId);
+  await until(
+    "document.querySelector('.history-controls h3')?.textContent.includes('過去') && !document.querySelector('[role=status]')",
+  );
+  const displayed = await evaluate(
+    "document.querySelector('.analysis-area').textContent",
+  );
+  assert.ok(displayed.includes("現在の販売状況とは異なります"));
+  await browser("select", ".history-controls select", "");
+  await until(
+    "document.querySelector('.history-controls h3')?.textContent.includes('販売中') && !document.querySelector('[role=status]')",
+  );
+  pass("Saved observation selection and return to current inventory");
   await browser("fill", "input[placeholder='1']", "200");
   await browser("fill", "input[placeholder='100']", "100");
   await until(
@@ -81,32 +108,46 @@ try {
   await browser("press", "Backspace");
   await until("!document.querySelector('.analysis-area [role=alert]')");
   pass("Invalid numeric range reports error and recovers");
-  await browser("click", ".event-card:last-child");
+  await evaluate(
+    "[...document.querySelectorAll('.event-card')].at(-1).click()",
+  );
+  await until(
+    "document.querySelector('.ticket-type') && !document.querySelector('.filterbar')",
+  );
+  await evaluate("document.querySelector('.ticket-type').click()");
   await until("document.querySelector('.filterbar')");
   await browser("fill", "input[placeholder='A / B / S']", "ZZZ");
-  await until("document.querySelector('.metrics')?.textContent.includes('0')");
+  await until(
+    "document.querySelector('.analysis-area .empty')?.textContent.includes('この条件')",
+  );
   await browser("back");
-  await until("document.querySelector('.filterbar')");
+  await until(
+    "document.querySelector('.ticket-type') && !document.querySelector('.filterbar')",
+  );
   assert.equal(await evaluate("location.href"), firstUrl);
+  await evaluate("document.querySelector('.ticket-type').click()");
+  await until("document.querySelector('.filterbar')");
   assert.deepEqual(
     await evaluate(
       "[...document.querySelectorAll('.filterbar input')].map(e=>e.value)",
     ),
     ["", "", ""],
   );
-  pass("Back navigation resets event-specific filters");
-  await browser("click", ".tabs button:nth-child(2)");
-  await until(
-    "document.querySelector('.tabs button:nth-child(2)').classList.contains('active')",
-  );
+  pass("Back navigation clears ticket type and event-specific filters");
+  await browser("click", ".tabs button:nth-child(1)");
+  await until("document.querySelector('.metrics')");
   await browser("click", ".tabs button:nth-child(3)");
   await until(
-    "document.querySelector('.tabs button:nth-child(3)').classList.contains('active')",
+    "document.body.textContent.includes('Internet Archiveの保存ページ')",
   );
-  pass("Listing and official/coverage tabs");
+  pass("Analysis and official/coverage tabs, archive reference link");
   await browser("open", firstUrl);
-  await until("document.querySelector('.filterbar')");
-  pass("Direct event URL loads");
+  await until("document.querySelector('.ticket-type')");
+  pass("Direct event URL loads ticket selection");
+  await evaluate("document.querySelector('.ticket-type').click()");
+  await until(
+    "document.querySelector('.history-controls') && !document.querySelector('[role=status]')",
+  );
   for (const width of [1440, 390]) {
     await browser("set", "viewport", String(width), "900");
     await until("document.documentElement.scrollWidth <= innerWidth");
@@ -121,8 +162,8 @@ try {
   await until(
     "document.querySelector('[role=alert]')?.textContent.includes('404')",
   );
-  await browser("click", ".event-card:first-child");
-  await until("document.querySelector('.filterbar')");
+  await evaluate("document.querySelector('.event-card').click()");
+  await until("document.querySelector('.ticket-type')");
   pass("Unknown event error and recovery");
   await browser("open", base + "/admin");
   await browser("fill", "input[type=password]", "invalid-verification-key");

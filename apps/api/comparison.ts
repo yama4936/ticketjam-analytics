@@ -8,12 +8,13 @@ export async function priceCohorts(
   group: string | null = null,
   by = "type",
   eventId: string | null = null,
+  snapshotId: string | null = null,
 ) {
   return (
     await pool.query(
       `WITH latest AS (
     SELECT DISTINCT ON(s.event_id) s.event_id,r.id,r.completed_at,r.status FROM collection_runs r JOIN source_events s ON s.id=r.source_event_id
-    WHERE r.status IN('complete','partial') ORDER BY s.event_id,r.scheduled_at DESC
+    WHERE r.status IN('complete','partial') AND ($5::uuid IS NULL OR r.id=$5) ORDER BY s.event_id,r.scheduled_at DESC
   ), matched AS (
     SELECT e.id AS event_id,e.title,e.starts_at,r.completed_at AS observed_at,r.status,o.id AS observation_id,o.quantity,o.price_yen,
       t.id AS official_type_id,t.name AS official_type,t.face_value_yen,
@@ -34,7 +35,7 @@ export async function priceCohorts(
     CASE WHEN official_type_id IS NOT NULL AND face_value_yen IS NOT NULL THEN percentile_cont(0.5) WITHIN GROUP(ORDER BY price_yen) END AS median_price_yen
     FROM matched GROUP BY event_id,title,starts_at,observed_at,status,official_type_id,official_type,purpose,face_value_yen,prefix_segment
     ORDER BY starts_at,event_id,official_type_id NULLS LAST,purpose,prefix_segment LIMIT 1000`,
-      [group, by, NORMALIZATION_VERSION, eventId],
+      [group, by, NORMALIZATION_VERSION, eventId, snapshotId],
     )
   ).rows;
 }
