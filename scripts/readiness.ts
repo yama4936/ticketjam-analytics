@@ -28,6 +28,20 @@ try {
       await readFile(".local/evidence/backup-verification.json", "utf8"),
     );
   } catch {}
+  let publication: {
+    url?: string;
+    checkedAt?: string;
+    domainConfigured?: boolean;
+    externalHttpsVerified?: boolean;
+  } = {};
+  try {
+    publication = JSON.parse(
+      await readFile(".local/evidence/publication.json", "utf8"),
+    );
+  } catch {}
+  const publicationFresh =
+    publication.checkedAt &&
+    Date.now() - Date.parse(publication.checkedAt) < 86400000;
   const report = {
     checkedAt: new Date().toISOString(),
     runtime,
@@ -36,8 +50,14 @@ try {
     alerts,
     backup,
     multiDayElapsed: Number(runtime.elapsed_hours) >= 48,
-    publication: { domainConfigured: false, externalHttpsVerified: false },
-    note: "48時間未満、未解決の欠測・失敗、取得元停止、公開URL未検証の状態で公開完了と判定しない。部分取得の原因も個別確認する。",
+    publication: {
+      ...publication,
+      domainConfigured: publication.domainConfigured === true,
+      externalHttpsVerified: Boolean(
+        publicationFresh && publication.externalHttpsVerified,
+      ),
+    },
+    note: "48時間未満、未解決の欠測・失敗、取得元停止、公開URL未検証の状態で全要件達成と判定しない。部分取得の原因も個別確認する。",
   };
   await mkdir(".local/evidence", { recursive: true });
   await writeFile(

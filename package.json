@@ -18,7 +18,8 @@
     "backup:verify": "tsx scripts/verify-backup.ts",
     "reprocess": "tsx scripts/reprocess.ts",
     "reaggregate": "tsx scripts/reaggregate.ts",
-    "readiness": "tsx scripts/readiness.ts"
+    "readiness": "tsx scripts/readiness.ts",
+    "publication:verify": "tsx scripts/verify-publication.ts"
   },
   "dependencies": {
     "@fastify/rate-limit": "11.2.0",

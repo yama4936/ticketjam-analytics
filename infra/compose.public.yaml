@@ -1,0 +1,22 @@
+services:
+  tunnel:
+    image: cloudflare/cloudflared@sha256:51c9cefcb4569df44e1ad403ab1d3d8065aa8e84339bcfc6aee75502e1140339
+    user: "65532:65532"
+    restart: unless-stopped
+    command: [tunnel, --no-autoupdate, --config, /etc/cloudflared/config.yaml, run]
+    volumes:
+      - ./cloudflared.yaml:/etc/cloudflared/config.yaml:ro
+      - ../.local/cloudflared/tunnel.json:/etc/cloudflared/tunnel.json:ro
+    depends_on:
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, cloudflared, tunnel, --metrics, "127.0.0.1:2000", ready]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

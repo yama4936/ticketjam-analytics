@@ -33,7 +33,13 @@ const filters = z
   );
 
 export async function buildServer(pool: pg.Pool) {
-  const app = Fastify({ logger: true, bodyLimit: 65536 });
+  // In Compose, only Nginx reaches this internal listener and replaces X-Forwarded-For.
+  const app = Fastify({
+    logger: true,
+    bodyLimit: 65536,
+    trustProxy:
+      process.env.TRUST_PROXY === "1" ? (_address, hop) => hop === 0 : false,
+  });
   await app.register(rateLimit, { max: 120, timeWindow: "1 minute" });
   app.addHook("onSend", async (_request, reply) => {
     reply.header("X-Content-Type-Options", "nosniff");

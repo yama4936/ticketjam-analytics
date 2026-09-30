@@ -11,6 +11,7 @@ test(
     const pool = createPool(process.env.TEST_DATABASE_URL);
     await migrate(pool);
     process.env.ADMIN_TOKEN = randomUUID();
+    process.env.TRUST_PROXY = "1";
     const app = await buildServer(pool);
     const headers = { authorization: `Bearer ${process.env.ADMIN_TOKEN}` },
       suffix = randomUUID();
@@ -167,6 +168,31 @@ test(
       await pool.query(
         "UPDATE official_sources SET enabled=false WHERE url=$1",
         [officialUrl],
+      );
+      // The proxy's immediate client address determines the limiter key,
+      // not an attacker-supplied address at the left of the forwarding chain.
+      for (let i = 0; i < 125; i++)
+        await app.inject({
+          url: "/api/groups",
+          headers: { "x-forwarded-for": "192.0.2.210" },
+        });
+      assert.equal(
+        (
+          await app.inject({
+            url: "/api/groups",
+            headers: { "x-forwarded-for": "192.0.2.211, 192.0.2.210" },
+          })
+        ).statusCode,
+        429,
+      );
+      assert.equal(
+        (
+          await app.inject({
+            url: "/api/groups",
+            headers: { "x-forwarded-for": "192.0.2.211" },
+          })
+        ).statusCode,
+        200,
       );
       for (let i = 0; i < 125; i++)
         await app.inject({ url: "/api/groups", remoteAddress: "192.0.2.123" });

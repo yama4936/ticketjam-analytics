@@ -78,12 +78,41 @@ npm run backup:verify
 既存DBへ上書きする `pg_restore --clean` や `docker compose down -v` は通常手順に含めない。
 `.env` の秘密値はdumpに含まれないため、別に安全な場所で保管する。
 
-## 公開の条件
+## 公開経路
 
-現状はlocalhost限定。既存ホームサーバーの公開用リバースプロキシ/トンネルから `http://127.0.0.1:4381` へ接続する。
-DB・APIの内部ポートは公開しない。新しいドメインのDNS・HTTPS・公開経路の追加先は未決定。
-既存Genesiaや他サービスの経路を上書きしない。
+公開URLは https://tickets.yama.asia 。Cloudflareに専用トンネル ticketjam-analytics
+（b0c1ce2b-d362-4644-82a6-d24bb512c1bf）と対応CNAMEを作成済み。
+Cloudflare → 専用tunnelコンテナ → web:80 → API の順で接続する。
+既存GenesiaのトンネルやDNSは変更していない。HTTPはHTTPSへ転送する。
 
-公開前に `docs/verification.md` の未完了項目を解消し、48時間以上の実稼働と欠測・部分取得を確認する。
-公開URLでトップ、詳細URL直アクセス、API、管理APIの未認証拒否、スマートフォン表示、HTTPSを検証する。
-取得・再利用の条件と公開項目を再確認し、出品者のプロフィール・画像・説明全文を公開しない。
+公開運用時は Compose に infra/compose.public.yaml を追加する。
+このサーバーではDBの開発用localhostポートも継続利用するため、次を使用する。
+
+```sh
+docker compose --env-file .env -f infra/compose.yaml -f infra/compose.dev.yaml -f infra/compose.public.yaml up -d --build
+docker compose --env-file .env -f infra/compose.yaml -f infra/compose.dev.yaml -f infra/compose.public.yaml ps
+npm run publication:verify
+npm run readiness
+```
+
+トンネルの設定は infra/cloudflared.yaml、認証ファイルは
+.local/cloudflared/tunnel.json（git対象外、所有者65532:65532・権限600）。
+稼働コンテナへは専用トンネルの認証ファイルだけを読み取り専用で渡す。
+アカウント管理用cert.pemは稼働コンテナへ渡さない。
+認証ファイルも別途安全にバックアップし、復旧時に同じ配置と所有者・権限へ戻す。
+ネットワーク環境に合わせHTTP/2を使用し、再起動ポリシーとトンネルhealthcheckを設定している。
+
+NginxはCloudflareのCF-Connecting-IPからX-Forwarded-Forを上書きする。
+APIはTRUST_PROXY=1のとき直前のプロキシ1段のみを信頼し、利用者別にアクセス制限を行う。
+APIのポートを直接インターネットへ公開しない。ローカル起動ではTRUST_PROXYは未設定のままにする。
+
+公開を一時停止する場合は上記Compose指定で stop tunnel を実行する。
+収集・DB・バックアップは動かしたままにできる。再開は up -d tunnel。
+設定変更後は必ず publication:verify を実行する。検証結果は
+.local/evidence/publication.json に保存し、readinessは24時間以内の成功記録のみをHTTPS検証済みとして扱う。
+
+公開画面は提供開始済みだが、48時間以上の実稼働・部分取得原因など
+docs/verification.md の継続検証は未完了。これを全要件達成と扱わない。
+出品者のプロフィール・画像・説明全文は公開しない。
+
+設定方式の参考: [Cloudflare公式のローカル管理トンネル手順](https://developers.cloudflare.com/tunnel/features/locally-managed-tunnels/create-local-tunnel/)。

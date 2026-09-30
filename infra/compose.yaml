@@ -65,6 +65,7 @@ services:
       ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN}
       HOST: 0.0.0.0
       PORT: 4381
+      TRUST_PROXY: "1"
     healthcheck:
       test:
         [
