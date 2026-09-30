@@ -31,7 +31,7 @@
 ## 検証方法
 
 - `npm run typecheck`、`npm run build`。
-- 専用PostgreSQL `ticketjam_test` に `TEST_DATABASE_URL` を指定して `npm test`。16テスト、DBテストのスキップなし。
+- 専用PostgreSQL `ticketjam_test` に `TEST_DATABASE_URL` を指定して `npm test`。17テスト、DBテストのスキップなし。
 - DockerのChromiumをCDP接続し、agent-browserで実際のWeb→API→DBの画面を検証。表示データをモックへ差し替えていない。
 - 公演比較から公演選択、公式券種、販売時間軸、幅390px、JavaScriptエラーなしを確認。
 - `npm run backup:verify` は書込中のDBから同一スナップショットのdumpとハッシュを取得し、別DBへ復元して全publicテーブルを照合。元DBへの復元ではない。

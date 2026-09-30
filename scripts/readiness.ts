@@ -9,7 +9,7 @@ try {
   ).rows[0];
   const gaps = (
     await pool.query(`SELECT e.title,count(*)::int AS missing_slots FROM source_events s JOIN events e ON e.id=s.event_id
-    CROSS JOIN LATERAL generate_series(date_trunc('hour',s.discovered_at)+interval '1 hour',date_trunc('hour',least(now()-interval '10 minutes',e.starts_at)),interval '1 hour') slot
+    CROSS JOIN LATERAL generate_series(date_trunc('hour',s.discovered_at)+interval '1 hour',date_trunc('hour',least(now()-interval '10 minutes',e.starts_at-interval '1 millisecond')),interval '1 hour') slot
     WHERE s.enabled AND NOT EXISTS(SELECT 1 FROM collection_runs r WHERE r.source_event_id=s.id AND r.scheduled_at=slot AND r.status IN('complete','partial')) GROUP BY e.id`)
   ).rows;
   const sourceBlocks = (

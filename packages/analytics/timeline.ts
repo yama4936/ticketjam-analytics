@@ -9,8 +9,9 @@ export function withMissingSlots(
   const first = Math.min(...bySlot.keys());
   const last = Math.max(...bySlot.keys());
   const expectedThrough =
-    Math.floor(Math.min(now.getTime() - 600000, eventAt.getTime()) / 3600000) *
-    3600000;
+    Math.floor(
+      Math.min(now.getTime() - 600000, eventAt.getTime() - 1) / 3600000,
+    ) * 3600000;
   const result: TimelinePoint[] = [];
   for (let t = first; t <= Math.max(last, expectedThrough); t += 3600000) {
     result.push(

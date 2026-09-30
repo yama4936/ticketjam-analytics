@@ -26,3 +26,35 @@ test("missing schedules are gaps, never inventory zero; current collection has t
   assert.equal(result[1]!.listingCount, null);
   assert.deepEqual(withMissingSlots([], new Date(), new Date()), []);
 });
+
+test("collection stops before event start, including an exact hourly boundary", () => {
+  const point = {
+    runId: "one",
+    time: "2026-09-30T11:00:05Z",
+    scheduledAt: "2026-09-30T11:00:00Z",
+    status: "complete",
+    warnings: [],
+    error: null,
+    listingCount: 1,
+    ticketCount: 1,
+    minPrice: 1000,
+    medianPrice: 1000,
+    newCount: 1,
+  };
+  assert.equal(
+    withMissingSlots(
+      [point],
+      new Date("2026-09-30T12:00:00Z"),
+      new Date("2026-09-30T15:00:00Z"),
+    ).length,
+    1,
+  );
+  assert.equal(
+    withMissingSlots(
+      [point],
+      new Date("2026-09-30T12:40:00Z"),
+      new Date("2026-09-30T15:00:00Z"),
+    ).length,
+    2,
+  );
+});
