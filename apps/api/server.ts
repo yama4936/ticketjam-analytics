@@ -57,14 +57,14 @@ export async function buildServer(pool: pg.Pool) {
       typeof error.statusCode === "number"
         ? error.statusCode
         : 500;
-    reply
-      .code(code)
-      .send({
-        error:
-          code === 429
+    reply.code(code).send({
+      error:
+        code === 409
+          ? "公式情報が更新されています。管理データを再読込してください。"
+          : code === 429
             ? "アクセスが集中しています。少し待ってください。"
             : "データの取得に失敗しました",
-      });
+    });
   });
   await registerAdmin(app, pool);
   registerComparison(app, pool);

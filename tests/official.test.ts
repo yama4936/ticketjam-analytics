@@ -104,9 +104,23 @@ test(
         ],
       };
       await storeOfficial(pool, url, now, [stage]);
+      const oldEvidence = (
+        await pool.query("SELECT id FROM official_evidence WHERE event_id=$1", [
+          eventId,
+        ])
+      ).rows[0].id;
       await storeOfficial(pool, url, new Date(now.getTime() + 1000), [
         { ...stage, tickets: [{ ...ticket, price: 2500 }] },
       ]);
+      await assert.rejects(
+        reviewOfficial(
+          pool,
+          oldEvidence,
+          "confirmed",
+          "古い情報を再承認する操作のテスト",
+        ),
+        { statusCode: 409 },
+      );
       let types = (
         await pool.query("SELECT * FROM ticket_types WHERE event_id=$1", [
           eventId,
@@ -148,6 +162,53 @@ test(
           )
         ).rowCount,
         0,
+      );
+      await storeOfficial(pool, url, new Date(now.getTime() + 3000), [
+        { ...stage, tickets: [{ ...ticket, price: 2800 }] },
+      ]);
+      assert.equal(
+        (
+          await pool.query("SELECT * FROM ticket_types WHERE event_id=$1", [
+            eventId,
+          ])
+        ).rowCount,
+        0,
+        "Changed source fields do not revive a rejected identity",
+      );
+      await storeOfficial(pool, url, new Date(now.getTime() + 4000), [stage]);
+      assert.equal(
+        (
+          await pool.query("SELECT * FROM ticket_types WHERE event_id=$1", [
+            eventId,
+          ])
+        ).rowCount,
+        0,
+        "A rollback to old source fields does not revive a rejected identity",
+      );
+      await storeOfficial(pool, url, new Date(now.getTime() + 5000), [
+        { ...stage, tickets: [{ ...ticket, price: 2800 }] },
+      ]);
+      const latest = (
+        await pool.query(
+          "SELECT * FROM official_evidence WHERE event_id=$1 ORDER BY checked_at DESC LIMIT 1",
+          [eventId],
+        )
+      ).rows[0];
+      assert.equal(latest.review_status, "pending");
+      await reviewOfficial(
+        pool,
+        latest.id,
+        "confirmed",
+        "新しい根拠を確認して対応づけを再承認する",
+      );
+      assert.equal(
+        (
+          await pool.query(
+            "SELECT face_value_yen FROM ticket_types WHERE event_id=$1",
+            [eventId],
+          )
+        ).rows[0].face_value_yen,
+        2800,
       );
     } finally {
       await pool.end();

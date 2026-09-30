@@ -12,6 +12,14 @@ interface Review {
   };
 }
 interface Summary {
+  evidence: (Pick<
+    Review,
+    "id" | "title" | "source_url" | "extracted_fields"
+  > & {
+    review_status: string;
+    checked_at: string;
+    review_note: string | null;
+  })[];
   reviews: Review[];
   groups: {
     id: string;
@@ -182,6 +190,71 @@ export function Admin() {
                   対応づけを却下
                 </button>
               </article>
+            ))}
+          </section>
+          <section className="panel">
+            <h2>登録済み公式情報の訂正</h2>
+            <p className="muted">
+              確認済みの対応づけも取り消せます。取り消すと定価比較への利用を止めます。確認履歴と取得した情報は残ります。
+            </p>
+            {data.evidence.map((r) => (
+              <details key={r.id} className="official">
+                <summary>
+                  {r.title} / {r.extracted_fields?.stageName} —{" "}
+                  {
+                    {
+                      confirmed: "確認済み",
+                      pending: "確認待ち",
+                      rejected: "却下済み",
+                    }[r.review_status]
+                  }
+                </summary>
+                <p>
+                  取得日時{" "}
+                  {new Date(r.checked_at).toLocaleString("ja-JP", {
+                    timeZone: "Asia/Tokyo",
+                  })}{" "}
+                  JST
+                </p>
+                <p>
+                  {r.extracted_fields?.tickets
+                    .map(
+                      (t) =>
+                        `${t.name} ¥${t.price.toLocaleString()} (${t.windowName})`,
+                    )
+                    .join(" / ")}
+                </p>
+                <a href={r.source_url ?? "#"} target="_blank" rel="noreferrer">
+                  公式ページ
+                </a>
+                {r.review_note && <p>前回の根拠: {r.review_note}</p>}
+                <label>
+                  訂正・再確認の根拠（10文字以上）
+                  <input
+                    value={notes[r.id] ?? ""}
+                    onChange={(e) =>
+                      setNotes({ ...notes, [r.id]: e.target.value })
+                    }
+                  />
+                </label>
+                <button
+                  className="refresh"
+                  disabled={busy || (notes[r.id]?.length ?? 0) < 10}
+                  onClick={() =>
+                    void mutate(`evidence/${r.id}`, {
+                      decision:
+                        r.review_status === "confirmed"
+                          ? "rejected"
+                          : "confirmed",
+                      note: notes[r.id],
+                    })
+                  }
+                >
+                  {r.review_status === "confirmed"
+                    ? "対応づけを取り消す"
+                    : "根拠に基づき確認する"}
+                </button>
+              </details>
             ))}
           </section>
           <section className="panel">

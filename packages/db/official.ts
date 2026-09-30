@@ -54,10 +54,12 @@ export async function storeOfficial(
         ).rows[0];
         // A manual approval covers the stage identity, not arbitrary future field changes.
         const confirmed =
-          exactVenue ||
-          Boolean(
-            link.confirmed_at && (!prior || prior.fingerprint === fingerprint),
-          );
+          !link.rejected_at &&
+          (exactVenue ||
+            Boolean(
+              link.confirmed_at &&
+              (!prior || prior.fingerprint === fingerprint),
+            ));
         const evidence = (
           await c.query(
             `INSERT INTO official_evidence(event_id,source_url,checked_at,parser_version,extracted_fields,review_status,fingerprint)
@@ -74,6 +76,13 @@ export async function storeOfficial(
           )
         ).rows[0];
         matches++;
+        if (link.rejected_at && evidence.review_status === "confirmed") {
+          await c.query(
+            "UPDATE official_evidence SET review_status='pending' WHERE id=$1",
+            [evidence.id],
+          );
+          evidence.review_status = "pending";
+        }
         if (evidence.review_status === "rejected") continue;
         if (evidence.review_status !== "confirmed") {
           const pending = await c.query(
@@ -174,6 +183,13 @@ async function materializeOfficial(
   await c.query("DELETE FROM ticket_types WHERE id=ANY($1::uuid[])", [stale]);
 }
 
+export class OfficialReviewConflict extends Error {
+  statusCode = 409;
+  constructor() {
+    super("公式情報が更新されています。最新の情報を再確認してください。");
+  }
+}
+
 export async function reviewOfficial(
   pool: pg.Pool,
   evidenceId: string,
@@ -183,6 +199,15 @@ export async function reviewOfficial(
   const c = await pool.connect();
   try {
     await c.query("BEGIN");
+    const identity = (
+      await c.query("SELECT source_url FROM official_evidence WHERE id=$1", [
+        evidenceId,
+      ])
+    ).rows[0];
+    if (!identity) throw new Error("Evidence not found");
+    await c.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+      `official:${identity.source_url}`,
+    ]);
     const row = (
       await c.query("SELECT * FROM official_evidence WHERE id=$1 FOR UPDATE", [
         evidenceId,
@@ -190,6 +215,15 @@ export async function reviewOfficial(
     ).rows[0];
     if (!row?.event_id)
       throw new Error("Evidence with event association required");
+    const newer = await c.query(
+      "SELECT 1 FROM official_evidence WHERE event_id=$1 AND source_url=$2 AND checked_at>$3 LIMIT 1",
+      [row.event_id, row.source_url, row.checked_at],
+    );
+    if (newer.rowCount) throw new OfficialReviewConflict();
+    await c.query(
+      "INSERT INTO official_reviews(evidence_id,decision,note) VALUES($1,$2,$3)",
+      [evidenceId, decision, note],
+    );
     await c.query("UPDATE official_evidence SET review_status=$2 WHERE id=$1", [
       evidenceId,
       decision,
@@ -197,12 +231,16 @@ export async function reviewOfficial(
     const stage = row.extracted_fields as OfficialStage;
     if (decision === "confirmed") {
       await c.query(
-        "UPDATE official_links SET confirmed_at=now(),review_note=$4 WHERE event_id=$1 AND source_url=$2 AND stage_id=$3",
+        "UPDATE official_links SET confirmed_at=now(),rejected_at=NULL,review_note=$4 WHERE event_id=$1 AND source_url=$2 AND stage_id=$3",
         [row.event_id, row.source_url, stage.stageId, note],
       );
       await materializeOfficial(c, row.event_id, row.id, stage);
     }
     if (decision === "rejected") {
+      await c.query(
+        "UPDATE official_links SET confirmed_at=NULL,rejected_at=now(),review_note=$4 WHERE event_id=$1 AND source_url=$2 AND stage_id=$3",
+        [row.event_id, row.source_url, stage.stageId, note],
+      );
       await c.query(
         "DELETE FROM sale_windows WHERE ticket_type_id IN(SELECT id FROM ticket_types WHERE evidence_id=$1)",
         [evidenceId],

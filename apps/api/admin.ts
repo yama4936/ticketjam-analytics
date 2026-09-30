@@ -33,8 +33,12 @@ export async function registerAdmin(app: FastifyInstance, pool: pg.Pool) {
       pool.query(
         "SELECT * FROM official_sources ORDER BY checked_at DESC NULLS FIRST LIMIT 100",
       ),
+      pool.query(`SELECT DISTINCT ON(oe.event_id,oe.source_url) oe.id,oe.source_url,oe.checked_at,oe.review_status,oe.extracted_fields,e.title,
+        (SELECT note FROM official_reviews WHERE evidence_id=oe.id ORDER BY reviewed_at DESC LIMIT 1) AS review_note
+        FROM official_evidence oe JOIN events e ON e.id=oe.event_id ORDER BY oe.event_id,oe.source_url,oe.checked_at DESC`),
     ]);
     return {
+      evidence: results[5]!.rows,
       groups: results[0]!.rows,
       reviews: results[1]!.rows,
       sources: results[2]!.rows,
@@ -47,7 +51,7 @@ export async function registerAdmin(app: FastifyInstance, pool: pg.Pool) {
     const body = z
       .object({
         decision: z.enum(["confirmed", "rejected"]),
-        note: z.string().min(10).max(1000),
+        note: z.string().trim().min(10).max(1000),
       })
       .parse(request.body);
     const row = (
@@ -61,6 +65,22 @@ export async function registerAdmin(app: FastifyInstance, pool: pg.Pool) {
       body.decision,
       body.note,
     );
+    return { ok: true };
+  });
+  app.post("/api/admin/evidence/:id", async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
+    const { decision, note } = z
+      .object({
+        decision: z.enum(["confirmed", "rejected"]),
+        note: z.string().trim().min(10).max(1000),
+      })
+      .parse(request.body);
+    if (
+      !(await pool.query("SELECT 1 FROM official_evidence WHERE id=$1", [id]))
+        .rowCount
+    )
+      return reply.code(404).send({ error: "公式情報が見つかりません" });
+    await reviewOfficial(pool, id, decision, note);
     return { ok: true };
   });
   app.post("/api/admin/groups", async (request) => {

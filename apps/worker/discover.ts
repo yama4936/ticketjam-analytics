@@ -14,6 +14,7 @@ export async function discoverGroup(
   pool: pg.Pool,
   groupId: string,
   maxActiveEvents = 5,
+  http: Pick<TicketjamHttp, "get"> = new TicketjamHttp(pool),
 ) {
   if (
     !Number.isInteger(maxActiveEvents) ||
@@ -36,7 +37,6 @@ export async function discoverGroup(
   try {
     // Serializes discovery imports globally, including the active-event budget.
     await client.query("SELECT pg_advisory_lock(hashtext('discovery-import'))");
-    const http = new TicketjamHttp(pool);
     const category = await http.get(
       `https://ticketjam.jp/tickets/${group.ticketjam_slug}`,
     );
@@ -71,11 +71,11 @@ export async function discoverGroup(
           const count = Number(
             (
               await client.query(
-                "SELECT count(*) FROM source_events s JOIN events e ON e.id=s.event_id WHERE s.enabled AND e.starts_at>now()",
+                "SELECT count(*) FROM source_events s JOIN events e ON e.id=s.event_id WHERE s.enabled AND e.starts_at>now() AND EXISTS(SELECT 1 FROM event_groups eg JOIN groups g ON g.id=eg.group_id WHERE eg.event_id=e.id AND g.enabled)",
               )
             ).rows[0].count,
           );
-          if (count >= maxActiveEvents) break;
+          if (count >= maxActiveEvents) continue;
           const response = await http.get(candidate.url);
           const page = parseEventPage(response.html, candidate.url);
           const sourceId = await registerEvent(pool, page.event, groupId);

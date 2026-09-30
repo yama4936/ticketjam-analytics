@@ -7,6 +7,10 @@ export async function monitor(pool: pg.Pool) {
     LEFT JOIN LATERAL(SELECT * FROM collection_runs WHERE source_event_id=s.id ORDER BY scheduled_at DESC LIMIT 1)r ON true
     WHERE s.enabled AND e.starts_at>now() AND EXISTS(SELECT 1 FROM event_groups eg JOIN groups g ON g.id=eg.group_id WHERE eg.event_id=e.id AND g.enabled)
       AND (r.status='failed' OR coalesce(r.completed_at,s.discovered_at)<now()-interval '90 minutes')
+    UNION ALL
+    SELECT 'discovery:'||g.id,g.name||': 公演発見処理に失敗しています' FROM groups g
+    JOIN LATERAL(SELECT status FROM discovery_runs WHERE group_id=g.id ORDER BY started_at DESC LIMIT 1)r ON true
+    WHERE g.enabled AND r.status IN('failed','partial')
     UNION ALL SELECT 'official:'||url,'公式ページの取得失敗: '||url FROM official_sources WHERE enabled AND last_error IS NOT NULL`)
   ).rows;
   const c = await pool.connect();
@@ -16,11 +20,17 @@ export async function monitor(pool: pg.Pool) {
       "SELECT pg_advisory_xact_lock(hashtext('operations-monitor'))",
     );
     for (const issue of issues) {
-      const r = await c.query(
-        `INSERT INTO operational_alerts(key,message) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET message=excluded.message,last_seen_at=now(),resolved_at=NULL RETURNING (xmax=0) AS created`,
+      const previous = (
+        await c.query(
+          "SELECT resolved_at FROM operational_alerts WHERE key=$1",
+          [issue.key],
+        )
+      ).rows[0];
+      await c.query(
+        `INSERT INTO operational_alerts(key,message) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET message=excluded.message,last_seen_at=now(),resolved_at=NULL`,
         [issue.key, issue.message],
       );
-      if (r.rows[0].created)
+      if (!previous || previous.resolved_at)
         console.error(JSON.stringify({ type: "operational_alert", ...issue }));
     }
     await c.query(

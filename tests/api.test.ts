@@ -161,6 +161,42 @@ test(
         ).statusCode,
         200,
       );
+      const headers = { authorization: `Bearer ${process.env.ADMIN_TOKEN}` };
+      const evidenceId = official.evidence_id;
+      for (const decision of ["rejected", "confirmed"]) {
+        const reviewed = await app.inject({
+          method: "POST",
+          url: `/api/admin/evidence/${evidenceId}`,
+          headers,
+          payload: { decision, note: "APIから公式対応づけを訂正する検証" },
+        });
+        assert.equal(reviewed.statusCode, 200);
+        const detail = (await app.inject(`/api/events/${eventId}`)).json();
+        assert.equal(
+          detail.official.some(
+            (t: { evidence_id: string }) => t.evidence_id === evidenceId,
+          ),
+          decision === "confirmed",
+        );
+      }
+      assert.equal(
+        (
+          await pool.query(
+            "SELECT * FROM official_reviews WHERE evidence_id=$1",
+            [evidenceId],
+          )
+        ).rowCount,
+        2,
+      );
+      assert.equal(
+        (
+          await pool.query("SELECT * FROM official_evidence WHERE id=$1", [
+            evidenceId,
+          ])
+        ).rowCount,
+        1,
+        "Review correction retains original evidence",
+      );
     } finally {
       await app.close();
       await pool.end();
