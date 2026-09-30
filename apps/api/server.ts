@@ -9,7 +9,7 @@ import type pg from "pg";
 import { createPool } from "../../packages/db/pool.js";
 import { NORMALIZATION_VERSION } from "../../packages/domain/types.js";
 import { histogram } from "../../packages/analytics/statistics.js";
-import { registerComparison } from "./comparison.js";
+import { registerComparison, priceCohorts } from "./comparison.js";
 import { registerAdmin } from "./admin.js";
 import { withMissingSlots } from "../../packages/analytics/timeline.js";
 import { migrate } from "../../packages/db/migrate.js";
@@ -102,7 +102,9 @@ export async function buildServer(pool: pg.Pool) {
     const events = (
       await pool.query(
         `SELECT e.*,s.url AS source_url,
-      m.listing_count,m.ticket_count,m.min_price_yen,m.median_price_yen,m.observed_at,m.complete,
+      m.listing_count,m.ticket_count,NULL::int AS min_price_yen,NULL::float AS median_price_yen,m.observed_at,m.complete,
+      ticket_purpose_v1(e.title) AS purpose,
+      (SELECT oe.extracted_fields->>'stageName' FROM official_evidence oe WHERE oe.event_id=e.id AND oe.review_status='confirmed' ORDER BY oe.checked_at DESC LIMIT 1) AS session_label,
       r.status AS latest_status,r.error AS latest_error,
       (SELECT jsonb_agg(jsonb_build_object('id',g.id,'name',g.name)) FROM event_groups eg JOIN groups g ON g.id=eg.group_id WHERE eg.event_id=e.id) AS groups
       FROM events e JOIN source_events s ON s.event_id=e.id AND s.source='ticketjam'
@@ -113,6 +115,9 @@ export async function buildServer(pool: pg.Pool) {
         [q.group ?? null, `%${q.q}%`],
       )
     ).rows;
+    const cohorts = await priceCohorts(pool, q.group ?? null);
+    for (const event of events)
+      event.price_groups = cohorts.filter((row) => row.event_id === event.id);
     const scope = (
       await pool.query(`SELECT (SELECT count(DISTINCT (source,external_id))::int FROM discovery_candidates) AS candidates,
       (SELECT count(*)::int FROM source_events s JOIN events e ON e.id=s.event_id WHERE s.enabled AND e.starts_at>now() AND EXISTS(SELECT 1 FROM event_groups eg JOIN groups g ON g.id=eg.group_id WHERE eg.event_id=e.id AND g.enabled)) AS monitored,
@@ -130,7 +135,9 @@ export async function buildServer(pool: pg.Pool) {
     const f = filters.parse(request.query);
     const event = (
       await pool.query(
-        "SELECT e.*,s.url AS source_url FROM events e JOIN source_events s ON s.event_id=e.id WHERE e.id=$1",
+        `SELECT e.*,s.url AS source_url,ticket_purpose_v1(e.title) AS purpose,
+        (SELECT oe.extracted_fields->>'stageName' FROM official_evidence oe WHERE oe.event_id=e.id AND oe.review_status='confirmed' ORDER BY oe.checked_at DESC LIMIT 1) AS session_label
+        FROM events e JOIN source_events s ON s.event_id=e.id WHERE e.id=$1`,
         [id],
       )
     ).rows[0];
@@ -147,8 +154,7 @@ export async function buildServer(pool: pg.Pool) {
     ];
     const condition = `($3::text IS NULL OR n.ticket_type=$3) AND ($4::text IS NULL OR n.admission_prefix=$4)
       AND ($5::int IS NULL OR n.admission_upper>=$5) AND ($6::int IS NULL OR n.admission_lower<=$6)
-      AND ($8::uuid IS NULL OR EXISTS(SELECT 1 FROM ticket_types t JOIN official_evidence oe ON oe.id=t.evidence_id WHERE t.id=$8 AND t.event_id=l.event_id AND oe.review_status='confirmed'
-        AND (t.name=n.ticket_type OR (t.admission_prefix=n.admission_prefix AND (SELECT count(*) FROM ticket_types tt WHERE tt.event_id=l.event_id AND tt.admission_prefix=n.admission_prefix)=1))))`;
+      AND ($8::uuid IS NULL OR matched_ticket_type_v1(l.event_id,o.admission_raw,n.ticket_type,n.admission_prefix)=$8)`;
     const observations = (
       await pool.query(
         `SELECT o.*,l.url,l.first_observed_at,n.admission_kind,n.admission_prefix,n.admission_lower,n.admission_upper,n.ticket_type
@@ -169,8 +175,8 @@ export async function buildServer(pool: pg.Pool) {
     ).rows;
     const aggregateRows = (
       await pool.query(
-        `SELECT o.run_id,count(*)::int AS listing_count,sum(o.quantity)::int AS ticket_count,min(o.price_yen) AS min_price,
-      percentile_cont(0.5) WITHIN GROUP(ORDER BY o.price_yen) AS median_price,
+        `SELECT o.run_id,count(*)::int AS listing_count,sum(o.quantity)::int AS ticket_count,CASE WHEN $8::uuid IS NOT NULL THEN min(o.price_yen) END AS min_price,
+      CASE WHEN $8::uuid IS NOT NULL THEN percentile_cont(0.5) WITHIN GROUP(ORDER BY o.price_yen) END AS median_price,
       count(*) FILTER(WHERE l.first_observed_at=o.observed_at)::int AS new_count
       FROM listing_observations o JOIN listings l ON l.id=o.listing_id
       LEFT JOIN observation_normalizations n ON n.observation_id=o.id AND n.version=$2
@@ -239,9 +245,23 @@ export async function buildServer(pool: pg.Pool) {
         [id],
       )
     ).rows;
+    const priceGroups = await priceCohorts(pool, null, "type", id);
+    const priceComparable = !!official.find(
+      (o) =>
+        o.id === f.officialType &&
+        o.review_status === "confirmed" &&
+        o.face_value_yen != null,
+    );
+    if (!priceComparable)
+      for (const point of timeline) {
+        point.minPrice = null;
+        point.medianPrice = null;
+      }
     const listed = listings.filter((o) => o.state === "listed");
     return {
       event,
+      priceGroups,
+      priceComparable,
       filters: f,
       types,
       official,
@@ -252,8 +272,12 @@ export async function buildServer(pool: pg.Pool) {
         ? {
             listingCount: aggregate.get(latestRun.id)?.listing_count ?? 0,
             ticketCount: aggregate.get(latestRun.id)?.ticket_count ?? 0,
-            minPrice: aggregate.get(latestRun.id)?.min_price ?? null,
-            medianPrice: aggregate.get(latestRun.id)?.median_price ?? null,
+            minPrice: priceComparable
+              ? (aggregate.get(latestRun.id)?.min_price ?? null)
+              : null,
+            medianPrice: priceComparable
+              ? (aggregate.get(latestRun.id)?.median_price ?? null)
+              : null,
           }
         : {
             listingCount: null,
@@ -261,7 +285,9 @@ export async function buildServer(pool: pg.Pool) {
             minPrice: null,
             medianPrice: null,
           },
-      histogram: histogram(listed.map((o) => o.price_yen)),
+      histogram: priceComparable
+        ? histogram(listed.map((o) => o.price_yen))
+        : [],
       truncated: observations.length === 5000,
       latestStatus: timeline.at(-1)?.status ?? "unobserved",
       capabilities: { soldConfirmation: false },

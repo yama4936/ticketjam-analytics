@@ -799,3 +799,10 @@ footer strong {
 .form-grid label + label {
   margin-top: 0;
 }
+
+.ticket-purpose { display: inline-block; font-size: .75rem; font-weight: 700; color: #184c3e; background: #e8eee5; border-radius: 4px; padding: 3px 7px; margin: 6px 0; }
+.event-original-title { display: block; font-size: .72rem; color: #73816d; line-height: 1.5; }
+.card-cohorts { display: grid; gap: 8px; margin-top: 10px; border-top: 1px solid #dce2d6; padding-top: 9px; }
+.card-cohort { display: grid; gap: 3px; font-size: .72rem; line-height: 1.5; }
+.purpose-filter { display: grid; gap: 5px; margin: 12px 0; font-size: .8rem; }
+.cohort-panel { margin: 20px 0; }

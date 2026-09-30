@@ -56,7 +56,8 @@ export function App() {
   }, []);
   const [groups, setGroups] = useState<Group[]>([]),
     [group, setGroup] = useState(""),
-    [query, setQuery] = useState("");
+    [query, setQuery] = useState(""),
+    [purpose, setPurpose] = useState("");
   const [index, setIndex] = useState<EventIndex | null>(null),
     [detail, setDetail] = useState<Detail | null>(null);
   const [selected, setSelected] = useState(
@@ -157,6 +158,13 @@ export function App() {
     if (pushHistory) history.pushState({}, "", url);
     setTab("analysis");
   }
+  const visibleEvents =
+    index?.events.filter(
+      (e) =>
+        !purpose ||
+        e.purpose === purpose ||
+        e.price_groups?.some((g) => g.purpose === purpose),
+    ) ?? [];
   const selectedOfficial = detail?.official.find((o) => o.id === officialType);
   const selectedSale =
     selectedOfficial?.sale_windows?.find((w) => w.id === saleWindow) ??
@@ -191,7 +199,7 @@ export function App() {
               <br className="mobile-break" />
               データで見る。
             </h1>
-            <p>出品価格、整理番号、掲載状況。1時間ごとの観測を積み重ねます。</p>
+            <p>同じ用途・部・券種で、出品価格と定価を比較します。</p>
           </div>
           <div className="scope">
             <strong>
@@ -229,7 +237,7 @@ export function App() {
           <aside className="events-panel">
             <div className="section-heading">
               <h2>公演を探す</h2>
-              <span>{index?.events.length ?? 0}</span>
+              <span>{visibleEvents.length}</span>
             </div>
             <label>
               グループ
@@ -250,17 +258,35 @@ export function App() {
                 onChange={(e) => setQuery(e.target.value)}
               />
             </label>
+            <label className="purpose-filter">
+              チケットの用途
+              <select
+                value={purpose}
+                onChange={(e) => setPurpose(e.target.value)}
+              >
+                <option value="">すべての用途</option>
+                {[
+                  "前物販",
+                  "特典会",
+                  "ライブ",
+                  "用途未確認",
+                  "用途複合・要確認",
+                ].map((p) => (
+                  <option key={p}>{p}</option>
+                ))}
+              </select>
+            </label>
             {error ? (
               <div role="alert" className="notice danger">
                 {error}
               </div>
             ) : !index ? (
               <p className="loading">公演を読み込み中…</p>
-            ) : !index.events.length ? (
+            ) : !visibleEvents.length ? (
               <div className="empty small">該当する公演はありません。</div>
             ) : (
               <div className="event-list">
-                {index.events.map((e) => (
+                {visibleEvents.map((e) => (
                   <button
                     key={e.id}
                     className={`event-card ${selected === e.id ? "selected" : ""}`}
@@ -268,18 +294,41 @@ export function App() {
                     aria-pressed={selected === e.id}
                   >
                     <span className="event-date">{date(e.starts_at)} JST</span>
-                    <strong>{e.title}</strong>
+                    <span className="ticket-purpose">{e.purpose}</span>
+                    <strong>
+                      {e.session_label && e.session_label !== e.venue
+                        ? e.session_label
+                        : e.title}
+                    </strong>
+                    {e.session_label && e.session_label !== e.venue && (
+                      <span className="event-original-title">{e.title}</span>
+                    )}
                     <span className="venue">{e.venue}</span>
                     <div className="event-bottom">
-                      <span>
-                        {money(e.median_price_yen)} <small>中央値</small>
-                      </span>
+                      <span>{e.listing_count ?? "—"}件の出品</span>
                       <span
                         className={`tag ${e.latest_status === "complete" ? "" : "caution"}`}
                       >
                         {status(e.latest_status)}
                       </span>
                     </div>
+                    <span className="card-cohorts">
+                      {e.price_groups?.map((g, i) => (
+                        <span className="card-cohort" key={i}>
+                          <b>
+                            {g.official_type_id
+                              ? g.segment
+                              : "券種・部の対応未確認"}
+                          </b>
+                          <span>
+                            {g.median_price_yen == null
+                              ? "価格集計対象外"
+                              : `中央値 ${money(g.median_price_yen)} / 定価 ${money(g.face_value_yen)}`}{" "}
+                            · {g.listing_count}件
+                          </span>
+                        </span>
+                      ))}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -299,6 +348,7 @@ export function App() {
               <>
                 <Comparison
                   group={group}
+                  purpose={purpose}
                   choose={choose}
                   refreshVersion={refresh}
                 />
@@ -336,7 +386,16 @@ export function App() {
                 <div className="detail-heading">
                   <div>
                     <span className="eyebrow">EVENT ANALYSIS</span>
-                    <h2>{detail.event.title}</h2>
+                    <span className="ticket-purpose">
+                      {detail.event.purpose}
+                    </span>
+                    <h2>
+                      {detail.event.session_label &&
+                      detail.event.session_label !== detail.event.venue
+                        ? detail.event.session_label
+                        : detail.event.title}
+                    </h2>
+                    {detail.event.session_label && <p>{detail.event.title}</p>}
                     <p>
                       {date(detail.event.starts_at)} JST · {detail.event.venue}
                     </p>
@@ -377,6 +436,59 @@ export function App() {
                     表示上限に達しました。期間を短くして確認してください。
                   </div>
                 )}
+                <section className="panel cohort-panel">
+                  <h3>用途・部・公式券種ごとの価格</h3>
+                  <p className="muted">
+                    前物販・特典会・ライブや、部・定価の違う券種をまとめて平均・中央値にしません。対応が不明な出品は価格集計の対象外です。
+                  </p>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>用途 / 券種</th>
+                          <th>定価（手数料別）</th>
+                          <th>出品中央値</th>
+                          <th>出品数</th>
+                          <th>分析</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.priceGroups.map((g, i) => (
+                          <tr key={i}>
+                            <td>
+                              {g.purpose}
+                              <br />
+                              {g.segment}
+                            </td>
+                            <td>{money(g.face_value_yen)}</td>
+                            <td>{money(g.median_price_yen)}</td>
+                            <td>{g.listing_count}件</td>
+                            <td>
+                              {g.official_type_id ? (
+                                <button
+                                  className="text-button"
+                                  onClick={() => {
+                                    setOfficialType(g.official_type_id!);
+                                    setType("");
+                                    setPrefix("");
+                                    setLower("");
+                                    setUpper("");
+                                    setSaleWindow("");
+                                    setAxis("date");
+                                  }}
+                                >
+                                  この券種を分析
+                                </button>
+                              ) : (
+                                "対応未確認"
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
                 <div className="filterbar">
                   <label>
                     券種
@@ -420,7 +532,7 @@ export function App() {
                     />
                   </label>
                   <label>
-                    公式券種との比較
+                    比較する公式券種
                     <select
                       value={officialType}
                       onChange={(e) => {
@@ -429,12 +541,12 @@ export function App() {
                         setAxis("date");
                       }}
                     >
-                      <option value="">比較しない</option>
+                      <option value="">券種を選択（混合集計なし）</option>
                       {detail.official
                         .filter((o) => o.review_status === "confirmed")
                         .map((o) => (
                           <option key={o.id} value={o.id}>
-                            {o.name}
+                            {o.name} / 定価 {money(o.face_value_yen)}
                           </option>
                         ))}
                     </select>
@@ -456,12 +568,20 @@ export function App() {
                   <div>
                     <span>出品価格の中央値</span>
                     <strong>{money(detail.summary.medianPrice)}</strong>
-                    <small>1枚あたり / 手数料別</small>
+                    <small>
+                      {detail.priceComparable
+                        ? "選択した同一券種のみ / 1枚あたり"
+                        : "公式券種を選択してください"}
+                    </small>
                   </div>
                   <div>
                     <span>最安値</span>
                     <strong>{money(detail.summary.minPrice)}</strong>
-                    <small>条件は各出品で異なります</small>
+                    <small>
+                      {detail.priceComparable
+                        ? `定価 ${money(selectedOfficial?.face_value_yen)} / 手数料別`
+                        : "異なる券種は混ぜません"}
+                    </small>
                   </div>
                   <div>
                     <span>出品件数</span>
@@ -553,6 +673,10 @@ export function App() {
                         <div className="loading">
                           条件に合うグラフを読み込み中…
                         </div>
+                      ) : !detail.priceComparable ? (
+                        <p className="notice">
+                          上の表から同じ用途・部・公式券種を選択すると価格グラフを表示します。定価や対応が不明な出品の価格は集計しません。
+                        </p>
                       ) : (
                         <Charts
                           data={detail}

@@ -98,7 +98,19 @@ test(
       let r = await app.inject(`/api/events/${eventId}`);
       assert.equal(r.statusCode, 200);
       let data = r.json();
-      assert.equal(data.summary.medianPrice, 6000);
+      assert.equal(data.summary.medianPrice, null);
+      assert.equal(data.priceComparable, false);
+      assert.ok(
+        data.timeline.every(
+          (p: { medianPrice: number | null }) => p.medianPrice === null,
+        ),
+      );
+      assert.deepEqual(
+        data.priceGroups
+          .map((g: { median_price_yen: number }) => g.median_price_yen)
+          .sort((a: number, b: number) => a - b),
+        [4000, 8000],
+      );
       assert.equal(data.summary.ticketCount, 3);
       assert.equal(data.official.length, 2);
       const comparison = (await app.inject("/api/comparison?by=prefix")).json();
@@ -110,7 +122,14 @@ test(
               segment: string;
               listing_count: number;
               median_price_yen: number;
-            }) => [r.segment, r.listing_count, r.median_price_yen],
+            }) => [
+              r.segment.split(" / ").at(-1),
+              r.listing_count,
+              r.median_price_yen,
+            ],
+          )
+          .sort((a: unknown[], b: unknown[]) =>
+            String(a[0]).localeCompare(String(b[0])),
           ),
         [
           ["A", 1, 4000],

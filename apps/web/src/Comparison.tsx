@@ -2,14 +2,16 @@ import { useEffect, useState } from "react";
 import type { Comparison as ComparisonData } from "./types.js";
 export function Comparison({
   group,
+  purpose,
   choose,
   refreshVersion,
 }: {
   group: string;
+  purpose: string;
   refreshVersion: number;
   choose: (id: string) => void;
 }) {
-  const [by, setBy] = useState("event"),
+  const [by, setBy] = useState("type"),
     [data, setData] = useState<ComparisonData | null>(null),
     [error, setError] = useState("");
   useEffect(() => {
@@ -28,6 +30,8 @@ export function Comparison({
       });
     return () => c.abort();
   }, [group, by, refreshVersion]);
+  const rows =
+    data?.rows.filter((r) => !purpose || r.purpose === purpose) ?? [];
   const money = (v: number | null) =>
     v === null ? "—" : `¥${v.toLocaleString("ja-JP")}`;
   return (
@@ -37,13 +41,12 @@ export function Comparison({
       <label>
         比較単位
         <select value={by} onChange={(e) => setBy(e.target.value)}>
-          <option value="event">公演ごと</option>
-          <option value="type">公演と券種</option>
-          <option value="prefix">公演と番号の接頭辞</option>
+          <option value="type">公演・部と公式券種</option>
+          <option value="prefix">同一公式券種と番号の接頭辞</option>
         </select>
       </label>
       <p className="muted">
-        左のグループ選択で絞り込めます。同一公演は重複計上しません。観測日時や公演までの日数、券種の条件を確認して比較してください。
+        左のグループ選択で絞り込めます。同一公演は重複計上しません。前物販・特典会・ライブ、部、公式券種を分けて比較します。対応不明の出品は中央値を算出しません。
       </p>
       {error ? (
         <p role="alert">{error}</p>
@@ -56,7 +59,8 @@ export function Comparison({
               <thead>
                 <tr>
                   <th>公演 / グループ</th>
-                  <th>区分</th>
+                  <th>用途 / 券種</th>
+                  <th>定価（手数料別）</th>
                   <th>中央値 / 最安値</th>
                   <th>出品 / 枚数</th>
                   <th>観測時点の残日数</th>
@@ -64,8 +68,8 @@ export function Comparison({
                 </tr>
               </thead>
               <tbody>
-                {data.rows.map((r) => (
-                  <tr key={`${r.event_id}:${r.segment}`}>
+                {rows.map((r) => (
+                  <tr key={`${r.event_id}:${r.segment}:${r.purpose}`}>
                     <td>
                       <button
                         className="text-button"
@@ -82,7 +86,12 @@ export function Comparison({
                         {r.groups?.join(" / ") ?? "グループ不明"}
                       </small>
                     </td>
-                    <td>{r.segment}</td>
+                    <td>
+                      {r.purpose}
+                      <br />
+                      {r.segment}
+                    </td>
+                    <td>{money(r.face_value_yen)}</td>
                     <td>
                       {money(r.median_price_yen)}
                       <br />
@@ -110,7 +119,7 @@ export function Comparison({
               </tbody>
             </table>
           </div>
-          {!data.rows.length && (
+          {!rows.length && (
             <p className="empty">比較できる観測がありません。</p>
           )}
           {data.truncated && (

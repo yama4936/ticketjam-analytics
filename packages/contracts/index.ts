@@ -3,7 +3,20 @@ export interface Group {
   name: string;
   enabled: boolean;
 }
+export interface PriceGroup {
+  official_type_id: string | null;
+  purpose: string;
+  segment: string;
+  face_value_yen: number | null;
+  listing_count: number;
+  ticket_count: number;
+  median_price_yen: number | null;
+  min_price_yen: number | null;
+}
 export interface EventSummary {
+  purpose: string;
+  session_label: string | null;
+  price_groups?: PriceGroup[];
   id: string;
   title: string;
   starts_at: string;
@@ -91,6 +104,8 @@ export interface Official {
     | null;
 }
 export interface Detail {
+  priceGroups: PriceGroup[];
+  priceComparable: boolean;
   event: EventSummary;
   types: string[];
   official: Official[];
@@ -110,7 +125,7 @@ export interface Detail {
 }
 
 export interface Comparison {
-  rows: {
+  rows: (PriceGroup & {
     event_id: string;
     title: string;
     starts_at: string;
@@ -122,6 +137,6 @@ export interface Comparison {
     ticket_count: number;
     min_price_yen: number | null;
     median_price_yen: number | null;
-  }[];
+  })[];
   truncated: boolean;
 }
