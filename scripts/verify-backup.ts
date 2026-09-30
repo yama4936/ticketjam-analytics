@@ -78,6 +78,10 @@ try {
     `SELECT count(*)::int AS count,md5(coalesce(string_agg(to_jsonb(t)::text,E'\n' ORDER BY to_jsonb(t)::text),'')) AS digest FROM public."${table.replaceAll('"', '""')}" t`;
   for (const table of tables)
     hashes[table] = (await client.query(digest(table))).rows[0];
+  const functionQuery = `SELECT p.proname,pg_get_function_identity_arguments(p.oid) AS arguments,
+    pg_get_functiondef(p.oid) AS definition FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='public' AND p.prokind='f' ORDER BY p.proname,arguments`;
+  const functions = (await client.query(functionQuery)).rows;
   await client.query("COMMIT");
   await command(["createdb", "-U", "ticketjam", restoreName]);
   created = true;
@@ -103,6 +107,11 @@ try {
       if (JSON.stringify(result) !== JSON.stringify(hashes[table]))
         throw new Error(`Restored data differs in ${table}`);
     }
+    const restoredFunctions = (await restored.query(functionQuery)).rows;
+    if (JSON.stringify(restoredFunctions) !== JSON.stringify(functions))
+      throw new Error(
+        "Restored public functions differ from source definitions",
+      );
   } finally {
     await restored.end();
   }
@@ -110,7 +119,12 @@ try {
     verifiedAt: new Date().toISOString(),
     dumpPath,
     tables: hashes,
-    result: "all table counts and row digests match exported snapshot",
+    functions: functions.map((f) => ({
+      name: f.proname,
+      arguments: f.arguments,
+    })),
+    result:
+      "all table counts, row digests and public function definitions match exported snapshot",
   };
   await writeFile(
     ".local/evidence/backup-verification.json",
@@ -118,7 +132,12 @@ try {
     { mode: 0o600 },
   );
   console.log(
-    JSON.stringify({ verified: true, tables: tables.length, dumpPath }),
+    JSON.stringify({
+      verified: true,
+      tables: tables.length,
+      functions: functions.length,
+      dumpPath,
+    }),
   );
 } finally {
   await client.query("ROLLBACK");
