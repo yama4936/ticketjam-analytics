@@ -199,6 +199,8 @@ export function SellingCharts({
                     type="number"
                     dataKey="hours"
                     domain={["dataMin", "dataMax"]}
+                    tickFormatter={(value: number) => value.toFixed(1)}
+                    tickCount={5}
                     name="基準発売からの時間"
                     unit="h"
                   />
