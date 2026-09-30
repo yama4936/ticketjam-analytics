@@ -72,6 +72,11 @@ export function Comparison({
                         {r.title}
                       </button>
                       <small className="cell-note">
+                        {new Date(r.starts_at).toLocaleString("ja-JP", {
+                          timeZone: "Asia/Tokyo",
+                        })}{" "}
+                        JST
+                        <br />
                         {r.groups?.join(" / ") ?? "グループ不明"}
                       </small>
                     </td>
