@@ -49,22 +49,34 @@ export function conditionBands(
       unknown: number;
     }
   >();
+  const maxValue = Math.max(
+    0,
+    ...rows.map((row) =>
+      by === "price"
+        ? row.asking_price_yen
+        : (row.admission_upper ?? row.number ?? 0),
+    ),
+  );
+  const width =
+    by === "price"
+      ? maxValue <= 10000
+        ? 1000
+        : 5000
+      : maxValue <= 100
+        ? 10
+        : 100;
   for (const row of rows) {
     const value = by === "price" ? row.asking_price_yen : row.number;
     if (value === null) continue;
-    const width = by === "price" ? 5000 : 100;
     // Exclude number ranges crossing a band rather than assign them to a misleading bucket.
-    const lower =
-      by === "price"
-        ? Math.floor(value / width) * width
-        : Math.floor((value - 1) / width) * width + 1;
+    const lower = Math.floor(value / width) * width;
     if (by === "number" && (row.admission_upper ?? value) >= lower + width)
       continue;
     const band = bands.get(lower) ?? {
       label:
         by === "price"
           ? `¥${lower.toLocaleString()}–${(lower + width - 1).toLocaleString()}`
-          : `${lower}–${lower + width - 1}番`,
+          : `${Math.max(1, lower)}–${lower + width - 1}番`,
       lower,
       purchased: 0,
       listed: 0,

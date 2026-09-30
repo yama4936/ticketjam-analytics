@@ -198,6 +198,7 @@ export function SellingCharts({
                   <XAxis
                     type="number"
                     dataKey="hours"
+                    domain={["dataMin", "dataMax"]}
                     name="基準発売からの時間"
                     unit="h"
                   />

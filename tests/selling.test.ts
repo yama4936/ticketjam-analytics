@@ -42,6 +42,21 @@ test("sales analysis preserves price provenance, release baseline and time bound
     null,
   );
   assert.equal(conditionBands([p!], "number").length, 0);
+  const small = sellingPoints(
+    [
+      {
+        ...row,
+        admission_lower: 80,
+        admission_upper: 89,
+        asking_price_yen: 3500,
+      },
+    ],
+    null,
+  );
+  assert.equal(conditionBands(small, "number")[0]!.label, "80–89番");
+  assert.equal(conditionBands(small, "number")[0]!.purchased, 1);
+  assert.equal(conditionBands(small, "price")[0]!.label, "¥3,000–3,999");
+
   const bands = conditionBands(
     sellingPoints(
       [
