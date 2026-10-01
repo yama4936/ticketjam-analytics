@@ -111,3 +111,9 @@ UIはユーザー指示に従い、公演→券種→購入条件グラフへ変
 「~」区切りや「番代」の整理番号解析をadmission-3へ更新し、元観測を保持したまま再分類した。
 
 27テストで、匿名Cookieを他出品へ引き継がないこと、公開302/403/429処理、部分取得からの購入確認、確認の重複防止、原観測不変、成約価格null保持、発売基準と時間幅、番号帯をまたぐ範囲の除外を検証した。
+
+### 2026-10-01: price and purchase timing readability
+
+- Price scatter axes use comma-separated yen, with the selected official ticket's face value shown as a persistent dashed reference line (fees excluded). Unknown face values do not get an invented reference.
+- Purchase timing shows confirmed purchases only, with days/hours on the axis and per-listing number, price, time interval, and difference from face value below the chart. The interval is still observation bounds, not an exact purchase time.
+- Typecheck, production build, both selling tests, and 11 browser flow checks passed. Public iLIVE S charts were visually checked at 390px; both reference lines and the purchase detail list rendered without horizontal overflow.

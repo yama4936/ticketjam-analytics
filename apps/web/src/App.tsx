@@ -353,6 +353,7 @@ export function App() {
                     >
                       <SellingCharts
                         data={detail}
+                        faceValue={ticket?.face_value_yen ?? null}
                         releasedAt={sale?.starts_at ?? null}
                       />
                     </Suspense>

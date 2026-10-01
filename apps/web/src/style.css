@@ -1000,3 +1000,12 @@ footer strong {
 .has-event .ticket-type.selected {
   padding: 11px;
 }
+
+.face-value-key { color: #943d1b; font-weight: 600; }
+.purchase-details { list-style: none; padding: 0; margin: 16px 0 0; max-height: 420px; overflow-y: auto; }
+.purchase-details li { padding: 14px 0; border-top: 1px solid #e6e9e1; }
+.purchase-details li > div { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; }
+.purchase-details strong:first-child { overflow-wrap: anywhere; min-width: 0; }
+.purchase-details strong:last-child { white-space: nowrap; }
+.purchase-details p { margin: 6px 0; font-size: 13px; }
+.purchase-details small { color: #637168; }

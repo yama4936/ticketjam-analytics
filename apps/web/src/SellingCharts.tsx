@@ -8,6 +8,7 @@ import {
   YAxis,
   Tooltip,
   ErrorBar,
+  ReferenceLine,
   BarChart,
   Bar,
   Legend,
@@ -18,6 +19,13 @@ import {
   conditionBands,
 } from "../../../packages/analytics/selling.js";
 const yen = (v: number) => `¥${v.toLocaleString("ja-JP")}`;
+const elapsed = (hours: number) => {
+  const minutes = Math.round(hours * 60);
+  const days = Math.floor(minutes / 1440);
+  const h = Math.floor((minutes % 1440) / 60);
+  const m = minutes % 60;
+  return `${days ? `${days}日` : ""}${h || !days ? `${h}時間` : ""}${m ? `${m}分` : ""}`;
+};
 const stateName = (s: string) =>
   s === "sold_confirmed"
     ? "購入済み確認"
@@ -27,9 +35,11 @@ const stateName = (s: string) =>
 export function SellingCharts({
   data,
   releasedAt,
+  faceValue,
 }: {
   data: Detail;
   releasedAt: string | null;
+  faceValue: number | null;
 }) {
   const [show, setShow] = useState("all");
   const rows = sellingPoints(data.outcomes, releasedAt);
@@ -38,8 +48,16 @@ export function SellingCharts({
   );
   const numberRows = visible.filter((r) => r.number !== null);
   const timeRows = visible.filter(
-    (r) => r.state !== "listed" && r.hours !== null,
+    (r) => r.state === "sold_confirmed" && r.hours !== null,
   );
+  const timeDomain: [number, number] = timeRows.length
+    ? [Math.floor(Math.min(...timeRows.map(r => r.lowerHours!)) / 24) * 24,
+       Math.max(24, Math.ceil(Math.max(...timeRows.map(r => r.upperHours!)) / 24) * 24)]
+    : [0, 24];
+  const reference = faceValue !== null ? (
+    <ReferenceLine y={faceValue} stroke="#b34f27" strokeWidth={2} strokeDasharray="6 4"
+      ifOverflow="extendDomain" label={{ value: `定価 ${yen(faceValue)}`, position: "insideTopRight", fill: "#943d1b", fontSize: 12 }} />
+  ) : null;
   const groups = [
     { state: "sold_confirmed", name: "購入済み確認", color: "#176f59" },
     { state: "listed", name: "掲載中", color: "#8aa4c2" },
@@ -60,8 +78,8 @@ export function SellingCharts({
         {payload[0].payload.hours !== null && (
           <>
             <br />
-            基準発売から {payload[0].payload.lowerHours.toFixed(1)}〜
-            {payload[0].payload.upperHours.toFixed(1)}時間
+            基準発売から {elapsed(payload[0].payload.lowerHours)}〜
+            {elapsed(payload[0].payload.upperHours)}
           </>
         )}
       </div>
@@ -137,6 +155,7 @@ export function SellingCharts({
           この券種では購入済みの確認データがまだありません。蓄積されると番号・価格・時間の傾向を表示します。
         </p>
       )}
+      <p className="face-value-key">{faceValue !== null ? `破線：定価 ${yen(faceValue)}（手数料別）` : "この券種は定価未確認のため、基準線を表示できません。"}</p>
       <label className="graph-controls">
         散布図の比較対象
         <select value={show} onChange={(e) => setShow(e.target.value)}>
@@ -151,16 +170,18 @@ export function SellingCharts({
           {numberRows.length ? (
             <div className="chart">
               <ResponsiveContainer width="100%" height="100%">
-                <ScatterChart>
+                <ScatterChart margin={{ top: 24, right: 20, bottom: 8, left: 0 }}>
                   <CartesianGrid stroke="#e6e9e1" />
                   <XAxis type="number" dataKey="number" name="整理番号の下限" />
                   <YAxis
                     type="number"
                     dataKey="price"
                     name="価格"
-                    width={60}
-                    tickFormatter={(v) => `${v / 1000}千円`}
+                    width={72}
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={(v) => `${v.toLocaleString("ja-JP")}円`}
                   />
+                  {reference}
                   <Tooltip content={tooltip} />
                   <Legend />
                   {groups.map((g) => (
@@ -186,34 +207,37 @@ export function SellingCharts({
           </p>
         </section>
         <section className="panel chart-panel">
-          <h3>発売からの時間 × 価格</h3>
+          <h3>購入済みになった時期と価格</h3>
           <p className="muted">
-            どの価格帯が、発売から何時間後に購入済みになったか
+            発売から何日後に購入済みが確認されたか。下の一覧で番号と価格を確認できます。
           </p>
           {timeRows.length ? (
             <div className="chart">
               <ResponsiveContainer width="100%" height="100%">
-                <ScatterChart>
+                <ScatterChart margin={{ top: 24, right: 20, bottom: 8, left: 0 }}>
                   <CartesianGrid stroke="#e6e9e1" />
                   <XAxis
                     type="number"
                     dataKey="hours"
-                    domain={["dataMin", "dataMax"]}
-                    tickFormatter={(value: number) => value.toFixed(1)}
-                    tickCount={5}
+                    domain={timeDomain}
+                    tickFormatter={(value: number) => elapsed(value)}
+                    tick={{ fontSize: 11 }}
+                    tickCount={3}
+                    minTickGap={24}
                     name="基準発売からの時間"
-                    unit="h"
                   />
                   <YAxis
                     type="number"
                     dataKey="price"
-                    width={60}
-                    tickFormatter={(v) => `${v / 1000}千円`}
+                    width={72}
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={(v) => `${v.toLocaleString("ja-JP")}円`}
                   />
+                  {reference}
                   <Tooltip content={tooltip} />
                   <Legend />
                   {groups
-                    .filter((g) => g.state !== "listed")
+                    .filter((g) => g.state === "sold_confirmed")
                     .map((g) => (
                       <Scatter
                         key={g.state}
@@ -224,7 +248,9 @@ export function SellingCharts({
                         <ErrorBar
                           dataKey="uncertainty"
                           direction="x"
-                          width={5}
+                          width={4}
+                          stroke="#176f59"
+                          strokeWidth={2}
                         />
                       </Scatter>
                     ))}
@@ -240,8 +266,19 @@ export function SellingCharts({
           )}
           <p className="chart-note">
             {timeRows.length}
-            件表示。横線は最後の掲載確認〜購入済み確認の区間です。実際の購入時刻・出品から売れるまでの時間ではありません。発売前の区間・時刻不明は除外します。
+            件表示。横線の左端は最後に掲載されていた時点、右端は購入済みを確認した時点です。点は区間の中央で、購入時刻ではありません。実際の購入時刻・出品から売れるまでの時間ではありません。発売前の区間・時刻不明は除外します。
           </p>
+          {timeRows.length > 0 && (
+            <ol className="purchase-details" aria-label="購入済みチケットの番号・価格・確認区間">
+              {[...timeRows].sort((a, b) => a.upperHours! - b.upperHours!).map(r => (
+                <li key={r.id}>
+                  <div><strong>{r.admission_raw || "整理番号不明"}</strong><strong>{yen(r.price)}</strong></div>
+                  <p>発売から {elapsed(r.lowerHours!)}〜{elapsed(r.upperHours!)}</p>
+                  <small>{r.priceKind}{faceValue !== null ? ` · 定価比 ${r.price >= faceValue ? "+" : "−"}${yen(Math.abs(r.price - faceValue))}` : ""}</small>
+                </li>
+              ))}
+            </ol>
+          )}
         </section>
         {(["number", "price"] as const).map((by) => {
           const bands = conditionBands(rows, by);
